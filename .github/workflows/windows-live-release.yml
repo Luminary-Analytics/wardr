@@ -1,0 +1,36 @@
+name: Wardr Windows live release smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Published signed Windows version to upgrade from
+        required: true
+        type: string
+      target:
+        description: Published Windows version currently offered by getwardr.com
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Install the detached signature verifier
+        run: python -m pip install cryptography==50.0.2
+      - name: Verify signed Setup and upgrade from the live feed
+        shell: pwsh
+        env:
+          WARDR_BASELINE: ${{ inputs.baseline }}
+          WARDR_TARGET: ${{ inputs.target }}
+        run: ./tests/smoke_windows_release.ps1 -BaselineVersion $env:WARDR_BASELINE -TargetVersion $env:WARDR_TARGET

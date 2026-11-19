@@ -24,6 +24,7 @@ import time
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import NameOID
@@ -31,6 +32,10 @@ from cryptography.x509.oid import NameOID
 
 HOST = "getwardr.com"
 LATEST = "/releases/latest.json"
+RELEASE_KEY = Path(__file__).resolve().parents[1] / "wardr" / "keys" / "release.pem"
+MANIFEST_LIMIT = 64 * 1024
+WHEEL_LIMIT = 20 * 1024 * 1024
+VERSION = r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}"
 SENTINEL = "wardr-upgrade-smoke"
 MARKER = b"<!-- Wardr update smoke fixture -->"
 LAUNCH = re.compile(r"^Wardr is running at http://127\.0\.0\.1:(\d+)/#access=([A-Za-z0-9_-]{43})$", re.M)
@@ -129,6 +134,85 @@ def build_signed_feed(root, baseline, candidate=None):
     return current, target, {LATEST: manifest, signature: signer.sign(manifest), download: wheel}, before_html, after_html
 
 
+def production_download(path, limit):
+    with closing(http.client.HTTPSConnection(HOST, timeout=15)) as connection:
+        connection.request("GET", path, headers={"Accept-Encoding": "identity", "Cache-Control": "no-cache"})
+        with connection.getresponse() as response:
+            if response.status != 200:
+                raise RuntimeError(f"Production release returned HTTP {response.status} for {path}")
+            data = response.read(limit + 1)
+    if not 0 < len(data) <= limit:
+        raise ValueError(f"Unexpected production download size for {path}")
+    return data
+
+
+def production_wheel_record(path, version, key):
+    manifest = production_download(path, MANIFEST_LIMIT)
+    signature_path = f"/releases/{version}/release.json.sig"
+    try:
+        key.verify(production_download(signature_path, 64), manifest)
+    except InvalidSignature as error:
+        raise ValueError(f"The production manifest at {path} did not authenticate for Wardr {version}") from error
+    document = json.loads(manifest)
+    if (not isinstance(document, dict) or type(document.get("schema_version")) is not int
+            or (document.get("schema_version"), document.get("channel"), document.get("version"),
+                document.get("signature")) != (1, "community", version, signature_path)):
+        raise ValueError(f"The signed production manifest does not describe Wardr {version}")
+    name = f"wardr-{version}-py3-none-any.whl"
+    artifact, = [row for row in document["artifacts"] if row["name"] == name]
+    if (artifact["url"] != f"/downloads/{name}" or type(artifact["bytes"]) is not int
+            or not 0 < artifact["bytes"] <= WHEEL_LIMIT
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])):
+        raise ValueError(f"The signed production manifest has invalid metadata for {name}")
+    return artifact
+
+
+def verify_wheel_bytes(data, record):
+    if len(data) != record["bytes"] or hashlib.sha256(data).hexdigest() != record["sha256"]:
+        raise ValueError(f"{record['name']} does not match its signed production manifest")
+
+
+def production_assets(baseline, target):
+    current = wheel_version(baseline)
+    if not re.fullmatch(VERSION, target) or tuple(map(int, target.split("."))) <= tuple(map(int, current.split("."))):
+        raise ValueError("--live-target must name a stable release newer than the baseline wheel")
+    pinned = RELEASE_KEY.read_bytes()
+    key = serialization.load_pem_public_key(pinned)
+    if not isinstance(key, ed25519.Ed25519PublicKey):
+        raise ValueError("The Wardr release key must be Ed25519")
+    published_baseline = production_wheel_record(f"/releases/{current}/release.json", current, key)
+    with baseline.open("rb") as handle:
+        baseline_data = handle.read(published_baseline["bytes"] + 1)
+    verify_wheel_bytes(baseline_data, published_baseline)
+    published_target = production_wheel_record(LATEST, target, key)
+    target_data = production_download(published_target["url"], published_target["bytes"])
+    verify_wheel_bytes(target_data, published_target)
+    with ZipFile(io.BytesIO(baseline_data)) as original, ZipFile(io.BytesIO(target_data)) as updated:
+        if original.read("wardr/keys/release.pem") != pinned or updated.read("wardr/keys/release.pem") != pinned:
+            raise ValueError("The production wheels do not carry the same pinned Wardr release key")
+        before_html = original.read("wardr/static/index.html")
+        after_html = updated.read("wardr/static/index.html")
+    return current, before_html, after_html, published_target["sha256"]
+
+
+def require_live_installation(python, current):
+    result = subprocess.check_output([str(python), "-I", "-c", """
+import hashlib
+import importlib.util
+import json
+from wardr import updater
+
+print(json.dumps([updater.current_version(), updater.installation_problem(),
+                  importlib.util.find_spec('sitecustomize') is not None,
+                  updater.RELEASE_HOST, hashlib.sha256(updater._PUBLIC_KEY.read_bytes()).hexdigest()]))
+"""], text=True, timeout=15)
+    version, problem, customized, host, key_digest = json.loads(result)
+    if version != current or problem or customized or host != HOST:
+        raise ValueError("Live smoke requires the official baseline in a fresh, updatable environment without sitecustomize")
+    if key_digest != hashlib.sha256(RELEASE_KEY.read_bytes()).hexdigest():
+        raise ValueError("The installed runtime does not have the official pinned release key")
+
+
 def secure_fixture(root, server, server_names):
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOST)])
@@ -187,8 +271,8 @@ def request(port, token, path, body=None):
         connection.close()
 
 
-def await_update_state(port, token, expected):
-    deadline = time.monotonic() + 60
+def await_update_state(port, token, expected, *, timeout=60):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         code, status = request(port, token, "/api/update")
         assert code == 200, "Could not read local update status"
@@ -285,7 +369,34 @@ def stop_dashboard(process, root):
             process.wait(timeout=10)
 
 
-def upgrade(root, python, feed_port, cert, current, target, before_html, after_html):
+def stop_windows_live_dashboard(state):
+    # After restart the first process has exited. Match the exact disposable
+    # command line so cleanup cannot touch a regular user's Wardr dashboard.
+    subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", r"""
+$ErrorActionPreference = 'Stop'
+$state = [regex]::Escape($env:WARDR_SMOKE_STATE)
+$pattern = '(?:^|\s)-I\s+-m\s+wardr\s+--state-dir\s+(?:"' + $state + '"|' + $state + ')(?=\s|$)'
+function Find-SmokeDashboard {
+    Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" |
+        Where-Object { $_.CommandLine -match $pattern }
+}
+for ($attempt = 0; $attempt -lt 4; $attempt++) {
+    $owned = @(Find-SmokeDashboard)
+    if (!$owned.Count) { exit 0 }
+    foreach ($process in $owned) {
+        try {
+            & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $process.ProcessId 2>&1 | Out-Null
+        } catch {
+            # A process can exit after enumeration. Confirm via the next query.
+        }
+    }
+    Start-Sleep -Milliseconds 250
+}
+if (Find-SmokeDashboard) { throw 'The disposable Wardr dashboard did not stop.' }
+"""], env={**os.environ, "WARDR_SMOKE_STATE": str(state)}, capture_output=True, check=True, timeout=20)
+
+
+def upgrade(root, python, current, target, before_html, after_html, *, environment=None, live=False):
     state = root / "device-state"
     saved, history, event = seed_state(state)
     port = launch_port()
@@ -294,9 +405,6 @@ def upgrade(root, python, feed_port, cert, current, target, before_html, after_h
         str(python), "-I", "-m", "wardr", "--state-dir", str(state), "serve", "--port", str(port),
         "--interval", str(MONITOR_INTERVAL), "--no-browser",
     ]
-    environment = {
-        **os.environ, "SSL_CERT_FILE": str(cert), "WARDR_SMOKE_FEED": str(feed_port), "WARDR_SMOKE_ROOT": str(root),
-    }
     with log.open("wb") as output, errors.open("wb") as error_output:
         process = subprocess.Popen(command, cwd=root.parent, env=environment, stdout=output, stderr=error_output)
         try:
@@ -308,7 +416,7 @@ def upgrade(root, python, feed_port, cert, current, target, before_html, after_h
             assert request(port, token, "/api/update/check", {})[0] == 202, "Update check failed"
             assert await_update_state(port, token, "available")["available_version"] == target, "Signed update was not offered"
             assert request(port, token, "/api/update/install", {"version": target})[0] == 202, "Install was refused"
-            status = await_update_state(port, token, "installed")
+            status = await_update_state(port, token, "installed", timeout=240 if live else 60)
             assert (status["current_version"], status["installed_version"]) == (current, target), "Unexpected install result"
             assert request(port, token, "/")[1] == before_html, "Dashboard switched assets before restart"
             assert request(port, token, "/api/update/restart", {})[0] == 202, "Restart was refused"
@@ -319,6 +427,9 @@ def upgrade(root, python, feed_port, cert, current, target, before_html, after_h
             assert request(port, token, "/api/update")[0] == 403, "The old token still grants access"
             assert await_update_state(port, new_token, "idle")["current_version"] == target, "Dashboard did not restart into the new wheel"
             assert request(port, new_token, "/")[1] == after_html, "Restarted dashboard differs from the candidate wheel"
+            if live:
+                assert request(port, new_token, "/api/update/check", {})[0] == 202, "Post-restart live check failed"
+                await_update_state(port, new_token, "current")
             _, defense = request(port, new_token, "/api/defense")
             assert defense["software"]["result"]["inventory"]["name"] == SENTINEL, "Saved software assessment was not loaded"
             _, status = request(port, new_token, "/api/status")
@@ -338,7 +449,11 @@ def upgrade(root, python, feed_port, cert, current, target, before_html, after_h
                 print("Dashboard stderr:\n" + diagnostics.strip()[-4000:], file=sys.stderr)
             raise
         finally:
-            stop_dashboard(process, root)
+            try:
+                stop_dashboard(process, root)
+            finally:
+                if live and os.name == "nt":
+                    stop_windows_live_dashboard(state)
 
 
 @contextmanager
@@ -386,7 +501,9 @@ def smoke(baseline, installed_python=None, candidate=None):
             worker.start()
             try:
                 with fixture_transport(python):
-                    upgrade(root, python, server.server_port, cert, current, target, before_html, after_html)
+                    environment = {**os.environ, "SSL_CERT_FILE": str(cert), "WARDR_SMOKE_FEED": str(server.server_port),
+                                   "WARDR_SMOKE_ROOT": str(root)}
+                    upgrade(root, python, current, target, before_html, after_html, environment=environment)
             finally:
                 server.shutdown()
                 worker.join()
@@ -396,17 +513,41 @@ def smoke(baseline, installed_python=None, candidate=None):
         print(f"Verified Wardr {current} to {target} in-place update and restart with preserved local state.")
 
 
+def live_smoke(baseline, target, installed_python):
+    if any(os.environ.get(name) for name in ("SSL_CERT_FILE", "SSL_CERT_DIR", "WARDR_SMOKE_FEED", "WARDR_SMOKE_ROOT")):
+        raise ValueError("Live smoke requires the default TLS trust and production release transport")
+    current, before_html, after_html, digest = production_assets(baseline, target)
+    with disposable_directory() as root:
+        python = installed_python or install_baseline(root, baseline)
+        if not python.is_absolute() or not python.is_file():
+            raise ValueError("Provide the absolute Python path of a disposable Wardr virtual environment")
+        require_live_installation(python, current)
+        upgrade(root, python, current, target, before_html, after_html, live=True)
+        installed = subprocess.check_output(
+            [str(python), "-I", "-c", "from importlib.metadata import version; print(version('wardr'))"],
+            text=True, timeout=15,
+        ).strip()
+        assert installed == target, "The installed package metadata did not advance to the production version"
+    print(f"Verified live Wardr {current} to {target} through https://{HOST} with preserved local state.")
+    print(f"Production wheel SHA-256: {digest}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheels", metavar="WHEEL", nargs="+", type=Path)
     parser.add_argument("--installed-python", type=Path, help="Python in a disposable environment already provisioned from WHEEL")
-    parser.add_argument("--candidate", type=Path, help="Exercise an update to these exact newer wheel bytes")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--candidate", type=Path, help="Exercise an update to these exact newer wheel bytes")
+    mode.add_argument("--live-target", help="Exercise the signed production update into this version")
     arguments = parser.parse_args()
-    if (arguments.installed_python or arguments.candidate) and len(arguments.wheels) != 1:
-        parser.error("--installed-python and --candidate each require exactly one baseline wheel")
+    if (arguments.installed_python or arguments.candidate or arguments.live_target is not None) and len(arguments.wheels) != 1:
+        parser.error("--installed-python, --candidate, and --live-target each require exactly one baseline wheel")
     # Exception context and captured dashboard output can include launch tokens.
     try:
         for wheel in arguments.wheels:
-            smoke(wheel.resolve(), arguments.installed_python, arguments.candidate)
+            if arguments.live_target is not None:
+                live_smoke(wheel.resolve(), arguments.live_target, arguments.installed_python)
+            else:
+                smoke(wheel.resolve(), arguments.installed_python, arguments.candidate)
     except Exception as error:
         raise SystemExit(f"{type(error).__name__}: {error}") from None
