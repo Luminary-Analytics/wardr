@@ -231,16 +231,22 @@ def wait_live_release(run_id, version, commit, timeout, *, baseline, retry_faile
                 sleep(min(_POLL_INTERVAL, visibility_left))
                 continue
             raise ReleaseError(f"Could not read the live release run. {link} {exc}") from exc
-        seen = True
+        same_run = isinstance(run, dict) and type(run.get("id")) is int and run["id"] == run_id
         if (
-            not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] != run_id
+            not same_run
             or not _matches_run(run, LIVE_RELEASE_WORKFLOW, commit, tag, event="workflow_dispatch")
             or run["path"].partition("@")[2] not in {"", tag, f"refs/tags/{tag}"}
             or run.get("display_title") != title
         ):
+            # GitHub can return a newly dispatched run before all its metadata is populated.
+            visibility_left = visibility_deadline - monotonic()
+            if not seen and same_run and run.get("status") != "completed" and visibility_left > 0:
+                sleep(min(_POLL_INTERVAL, visibility_left))
+                continue
             raise ReleaseError(
                 f"Run {run_id} does not match {title} on {tag} at {commit}. {link}"
             )
+        seen = True
         attempt = _id(run.get("run_attempt"), "workflow attempt")
         status, conclusion = run.get("status"), run.get("conclusion")
         if not isinstance(status, str) or (conclusion is not None and not isinstance(conclusion, str)):

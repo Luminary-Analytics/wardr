@@ -281,6 +281,24 @@ class LiveReleaseSmokeTests(unittest.TestCase):
         self.assertEqual([call.args for call in self.api.call_args_list], [(self.endpoint,)] * 2)
         self.sleep.assert_called_once()
 
+    def test_wait_tolerates_initial_pending_provenance_for_the_dispatched_id(self):
+        self.api.side_effect = (
+            self.run_response(status="queued", conclusion=None, display_title="Wardr live release smoke"),
+            self.run_response(),
+        )
+        self.wait_for_run()
+        self.assertEqual([call.args for call in self.api.call_args_list], [(self.endpoint,)] * 2)
+        self.sleep.assert_called_once()
+
+    def test_wait_rejects_provenance_changes_after_verification(self):
+        self.api.side_effect = (
+            self.run_response(status="queued", conclusion=None),
+            self.run_response(status="in_progress", conclusion=None, head_branch="main"),
+        )
+        with self.assertRaisesRegex(github.ReleaseError, "does not match"):
+            self.wait_for_run()
+        self.sleep.assert_called_once()
+
     def test_wait_fails_if_a_previously_visible_run_disappears(self):
         self.api.side_effect = (
             self.run_response(status="queued", conclusion=None),
