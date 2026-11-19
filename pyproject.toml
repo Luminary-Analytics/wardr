@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wardr"
+version = "0.2.0"
+description = "Local defensive assessments, telemetry hunting, and prioritized remediation."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+wardr = "wardr.cli:main"
+
+[tool.setuptools]
+packages = ["wardr"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+wardr = ["static/*"]

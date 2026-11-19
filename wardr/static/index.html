@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Wardr</title>
+  <link rel="icon" href="/static/wardr-mark.png">
+  <link rel="stylesheet" href="/static/wardr.css">
+  <script src="/static/wardr.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="Wardr workspace">
+      <a class="brand" href="#overview" aria-label="Wardr home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>wardr<span class="brand-period">.</span></span>
+      </a>
+      <nav class="navigation" aria-label="Main navigation">
+        <a href="#overview" data-nav="overview" aria-current="page"><span class="icon icon-grid" aria-hidden="true"></span>Overview</a>
+        <a href="#checklist" data-nav="checklist"><span class="icon icon-check" aria-hidden="true"></span>Checklist</a>
+        <a href="#defense" data-nav="defense"><span class="icon icon-defend" aria-hidden="true"></span>Defense</a>
+        <a href="#events" data-nav="events"><span class="icon icon-pulse" aria-hidden="true"></span>Events</a>
+        <a href="#reports" data-nav="reports"><span class="icon icon-file" aria-hidden="true"></span>Reports</a>
+      </nav>
+      <div class="device">
+        <span class="device-icon icon icon-device" aria-hidden="true"></span>
+        <div>
+          <p id="device-name">This device</p>
+          <p class="device-os" id="device-os">Connecting…</p>
+        </div>
+      </div>
+    </aside>
+    <main id="main" class="main" tabindex="-1">
+      <div class="shell">
+        <header class="topline">
+          <div class="scope"><span class="icon icon-device" aria-hidden="true"></span><span id="workspace-mode">Local workspace</span></div>
+          <div class="connection" id="connection"><span class="dot"></span><span id="connection-label">Connecting</span></div>
+        </header>
+        <div class="page-header">
+          <div>
+            <h1 id="page-title">Overview</h1>
+            <p id="page-description">Security checks and activity for this device.</p>
+          </div>
+          <button class="button button-primary" type="button" id="scan-button" disabled><span class="icon icon-scan" aria-hidden="true"></span><span id="scan-label">Run scan</span></button>
+        </div>
+        <div class="notice" id="connection-error" role="status" hidden></div>
+        <div class="notice" id="scan-notice" role="status" hidden></div>
+        <p class="sr-only" id="announcer" aria-live="polite"></p>
+        <section class="view" id="overview-view" aria-labelledby="page-title">
+          <div class="overview-grid">
+            <article class="posture">
+              <div class="posture-visual" aria-hidden="true"><span class="orbit orbit-outer"></span><span class="orbit orbit-inner"></span><span class="orbit-dot"></span><img src="/static/wardr-mark.png" alt="" id="hero-mark"></div>
+              <div class="posture-body">
+                <p class="posture-label"><span class="dot"></span>Security posture</p>
+                <h2 id="posture-headline">Waiting for results</h2>
+                <p id="posture-description">Complete a device scan to see your risk factors.</p>
+              </div>
+              <ul class="severity-summary" aria-label="Open findings by severity">
+                <li class="risk-critical"><span><i aria-hidden="true"></i>Critical</span><strong id="risk-critical">–</strong></li>
+                <li class="risk-high"><span><i aria-hidden="true"></i>High</span><strong id="risk-high">–</strong></li>
+                <li class="risk-medium"><span><i aria-hidden="true"></i>Medium</span><strong id="risk-medium">–</strong></li>
+                <li class="risk-low"><span><i aria-hidden="true"></i>Low</span><strong id="risk-low">–</strong></li>
+              </ul>
+            </article>
+            <article class="card review-card">
+              <div class="section-heading">
+                <div>
+                  <h2>Priority checklist</h2>
+                  <p>Address the checks that need attention.</p>
+                </div>
+                <a href="#checklist" class="text-link">View checklist <span aria-hidden="true">↗</span></a>
+              </div>
+              <div id="priority-list" class="check-list"><p class="empty">Scan results will appear here.</p></div>
+            </article>
+            <article class="card monitor-card">
+              <div class="card-icon"><span class="icon icon-pulse" aria-hidden="true"></span></div>
+              <h2>Event monitoring</h2>
+              <div class="monitor-status" id="monitor-status"><span class="dot" aria-hidden="true"></span><span id="monitor-label">Waiting for status</span></div>
+              <p id="monitor-detail">Tracks changes to supported settings and services on this device.</p>
+              <p id="monitor-coverage" class="monitor-coverage" hidden></p>
+              <div class="card-bottom"><a href="#events" class="text-link">View events <span aria-hidden="true">↗</span></a></div>
+            </article>
+            <article class="card intel-card">
+              <div class="card-icon"><span class="icon icon-intel" aria-hidden="true"></span></div>
+              <h2>Advisory catalog</h2>
+              <p>CISA’s list of vulnerabilities with evidence of active exploitation.</p>
+              <div class="intel-state" id="intel-state">Waiting for status</div>
+              <p class="intel-version" id="intel-version" hidden></p>
+              <details class="intel-advisories" id="intel-advisories" hidden>
+                <summary>Recent advisories</summary>
+                <p id="intel-scope"></p>
+                <ul id="intel-list"></ul>
+                <a class="text-link" id="intel-source" target="_blank" rel="noopener noreferrer" hidden>Open CISA catalog <span aria-hidden="true">↗</span></a>
+              </details>
+              <div class="card-bottom"><button class="button button-secondary button-small" type="button" id="intel-button" disabled>Refresh catalog</button></div>
+            </article>
+          </div>
+        </section>
+        <section class="view" id="checklist-view" aria-labelledby="page-title" hidden>
+          <div class="card checklist-card">
+            <div class="section-heading">
+              <div>
+                <h2>Device checks</h2>
+                <p id="checklist-subtitle">Scan results will appear here.</p>
+              </div>
+              <div class="field">
+                <label for="check-filter">Show</label>
+                <select id="check-filter">
+                  <option value="attention">Needs attention</option>
+                  <option value="unknown">Unable to verify</option>
+                  <option value="all">All results</option>
+                </select>
+              </div>
+            </div>
+            <div id="full-checklist" class="check-list"><p class="empty">Run a scan to review this device.</p></div>
+          </div>
+        </section>
+        <section class="view" id="defense-view" aria-labelledby="page-title" hidden>
+          <div class="defense-tabs" role="tablist" aria-label="Defense tools">
+            <button type="button" role="tab" id="defense-tab-plan" data-defense-tab="plan" aria-controls="defense-plan" aria-selected="true">Plan</button>
+            <button type="button" role="tab" id="defense-tab-exposure" data-defense-tab="exposure" aria-controls="defense-exposure" aria-selected="false" tabindex="-1">Exposure</button>
+            <button type="button" role="tab" id="defense-tab-hunting" data-defense-tab="hunting" aria-controls="defense-hunting" aria-selected="false" tabindex="-1">Hunting</button>
+            <button type="button" role="tab" id="defense-tab-software" data-defense-tab="software" aria-controls="defense-software" aria-selected="false" tabindex="-1">Software</button>
+          </div>
+          <p class="notice" id="defense-notice" role="status" hidden></p>
+          <div class="card" id="defense-plan" role="tabpanel" aria-labelledby="defense-tab-plan" tabindex="0">
+            <div class="section-heading defense-heading">
+              <div><h2>Remediation plan</h2><p>Prioritized actions with the evidence and a way to verify each change.</p></div>
+              <div class="defense-actions">
+                <button type="button" data-report="/plan.html" class="button button-secondary button-small" disabled>Open plan</button>
+                <button type="button" data-report="/plan.json?download=1" class="button button-secondary button-small" disabled>Download JSON</button>
+              </div>
+            </div>
+            <div id="plan-counts" class="defense-metrics" hidden></div>
+            <details class="coverage" id="plan-coverage" hidden><summary>Sources and coverage</summary><ul id="plan-sources"></ul></details>
+            <div id="plan-list" class="check-list"><p class="empty">Loading the latest evidence…</p></div>
+            <button type="button" class="button button-secondary button-small defense-more" id="plan-more" hidden>Show more</button>
+            <details class="defense-model" id="local-model">
+              <summary>Local AI review</summary>
+              <p>Group existing plan items for review using a verified model in Ollama on this device.</p>
+              <p id="local-model-status" role="status">Check whether the local model is ready.</p>
+              <div class="defense-actions">
+                <button type="button" id="local-model-check" class="button button-secondary button-small" disabled>Check model</button>
+                <button type="button" id="local-model-review" class="button button-secondary button-small" disabled>Review plan with AI</button>
+              </div>
+              <div class="check-list" id="local-model-results"></div>
+            </details>
+          </div>
+          <div class="card" id="defense-exposure" role="tabpanel" aria-labelledby="defense-tab-exposure" tabindex="0" hidden>
+            <div class="section-heading defense-heading">
+              <div><h2>Local network exposure</h2><p>Where services bind on this device. Reachability depends on firewall and network policy.</p></div>
+              <button type="button" id="exposure-refresh" class="button button-secondary button-small" disabled>Refresh exposure</button>
+            </div>
+            <p id="exposure-status" class="defense-caption" role="status">Waiting for local socket tables…</p>
+            <div id="exposure-counts" class="defense-metrics" hidden></div>
+            <details id="exposure-coverage" class="coverage" hidden><summary>Socket table coverage</summary><ul id="exposure-sources"></ul></details>
+            <div id="exposure-table" class="defense-table" hidden>
+              <table>
+                <caption class="sr-only">Local TCP listeners and UDP bindings</caption>
+                <thead><tr><th scope="col">Endpoint</th><th scope="col">Bind scope</th><th scope="col">Local owner</th></tr></thead>
+                <tbody id="exposure-list"></tbody>
+              </table>
+            </div>
+            <button type="button" class="button button-secondary button-small defense-more" id="exposure-more" hidden>Show more</button>
+          </div>
+          <div class="card" id="defense-hunting" role="tabpanel" aria-labelledby="defense-tab-hunting" tabindex="0" hidden>
+            <div class="section-heading defense-heading">
+              <div><h2>Threat hunting</h2><p>Patterns in recorded local events that warrant investigation.</p></div>
+            </div>
+            <p class="defense-caption" id="hunting-status">Waiting for local telemetry…</p>
+            <details id="hunting-coverage" class="coverage" hidden><summary>Signal coverage</summary><ul id="hunting-sources"></ul></details>
+            <div id="hunting-list" class="check-list"></div>
+          </div>
+          <div class="card" id="defense-software" role="tabpanel" aria-labelledby="defense-tab-software" tabindex="0" hidden>
+            <div class="section-heading defense-heading">
+              <div><h2>Software advisory matching</h2><p>Compare the package versions in an inventory with an imported OSV advisory export.</p></div>
+            </div>
+            <form id="software-form" class="software-form">
+              <div class="software-file"><label for="software-sbom">CycloneDX inventory</label><input type="file" id="software-sbom" aria-describedby="software-input-note" accept=".json,application/json" required></div>
+              <div class="software-file"><label for="software-osv">OSV advisories</label><input type="file" id="software-osv" aria-describedby="software-input-note" accept=".json,application/json" required></div>
+              <button type="submit" class="button button-primary button-small" id="software-assess" disabled>Assess software</button>
+              <p id="software-input-note">Choose two local JSON files. Combined upload limit 12 MiB.</p>
+            </form>
+            <p class="defense-caption" id="software-status">An assessment covers the supplied files.</p>
+            <div id="software-counts" class="defense-metrics" hidden></div>
+            <details class="coverage" id="software-coverage" hidden><summary>Assessment coverage</summary><ul id="software-sources"></ul></details>
+            <div id="software-list" class="check-list"></div>
+            <button type="button" class="button button-secondary button-small defense-more" id="software-more" hidden>Show more</button>
+          </div>
+        </section>
+        <section class="view" id="events-view" aria-labelledby="page-title" hidden>
+          <div class="card events-card">
+            <div class="section-heading">
+              <div>
+                <h2>Local activity</h2>
+                <p id="events-detail">Waiting for monitoring status.</p>
+              </div>
+              <div class="status-label" id="events-status">Waiting</div>
+            </div>
+            <details class="coverage" id="events-coverage" hidden>
+              <summary>Monitoring coverage</summary>
+              <ul id="coverage-list"></ul>
+            </details>
+            <p class="notice" id="history-detail" hidden></p>
+            <div id="event-list" class="event-list"><p class="empty">Events will appear here when Wardr detects a change.</p></div>
+          </div>
+        </section>
+        <section class="view" id="reports-view" aria-labelledby="page-title" hidden>
+          <div class="card reports-card">
+            <div class="section-heading">
+              <div>
+                <h2>Security assessment</h2>
+                <p id="report-detail">Reports describe the latest scan, its findings, and suggested next steps.</p>
+              </div>
+            </div>
+            <div class="report-options">
+              <div class="report-option">
+                <span class="card-icon icon icon-file" aria-hidden="true"></span>
+                <div><h3>Readable report</h3><p>Review the risk factors and recommended actions. Save a PDF from the browser’s print menu.</p></div>
+                <button type="button" data-report="/report.html" class="button button-secondary" disabled>Open report</button>
+              </div>
+              <div class="report-option">
+                <span class="card-icon icon icon-braces" aria-hidden="true">{ }</span>
+                <div><h3>JSON export</h3><p>Download the assessment data for local analysis or archiving.</p></div>
+                <button type="button" data-report="/report.json?download=1" class="button button-secondary" disabled>Download JSON</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <footer class="footer"><span>Wardr runs on this device.</span><span id="last-scan">No scan recorded</span></footer>
+      </div>
+    </main>
+  </div>
+  <dialog class="dialog" id="fix-dialog" aria-labelledby="fix-title">
+    <div class="dialog-body">
+      <div class="card-icon"><span class="icon icon-check" aria-hidden="true"></span></div>
+      <h2 id="fix-title">Apply this fix?</h2>
+      <p id="fix-effect"></p>
+      <p class="dialog-error" id="fix-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="cancel-fix">Cancel</button>
+        <button class="button button-primary" type="button" id="confirm-fix">Apply fix</button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>

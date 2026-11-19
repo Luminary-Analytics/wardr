@@ -1,0 +1,2 @@
+include design/render_mark.py design/wardr-mark.blend design/wardr-triposr.glb
+include LICENSE SECURITY.md
