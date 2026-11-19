@@ -16,8 +16,8 @@ import tomllib
 from zipfile import ZipFile
 
 from release_github import (
-    WINDOWS_LIVE_WORKFLOW, ReleaseError, dispatch_windows_live, fetch_installers, promote, stage_draft, wait_checks,
-    wait_signing, wait_windows_live,
+    LIVE_RELEASE_WORKFLOW, ReleaseError, dispatch_live_release, fetch_installers, promote, stage_draft, wait_checks,
+    wait_live_release, wait_signing,
 )
 
 
@@ -351,20 +351,20 @@ def publish(site, work, source, packages, installers, windows_sha, state, args):
             "--attempts", "60", "--deadline", "900", cwd=checkout, timeout=960)
 
 
-def verify_windows_release(stage, state, args):
+def verify_live_upgrade(stage, state, args):
     version = state["version"]
     baseline = state["upgrade_verified"]["version"]
-    log(f"Checking the live Windows upgrade from {baseline} to {version}.")
+    log(f"Checking native installers and the live upgrade from {baseline} to {version}.")
     try:
-        run_id = state.get("windows_live_run")
+        run_id = state.get("live_release_run")
         if run_id is None:
-            run_id = dispatch_windows_live(baseline, version)
-            state["windows_live_run"] = run_id
+            run_id = dispatch_live_release(baseline, version)
+            state["live_release_run"] = run_id
             save_state(stage, state)
-        wait_windows_live(run_id, version, state["commit"], args.timeout,
+        wait_live_release(run_id, version, state["commit"], args.timeout,
                           baseline=baseline, retry_failed=args.retry_failed)
     except (ReleaseError, OSError) as exc:
-        raise ReleaseError(f"Wardr {version} is public. The Windows live upgrade check did not pass. {exc}") from exc
+        raise ReleaseError(f"Wardr {version} is public. The native live release checks did not pass. {exc}") from exc
 
 
 def release(args):
@@ -389,8 +389,8 @@ def release(args):
     if args.plan:
         log(f"Wardr {version} from {commit}.")
         log("Verify CI and the previous-version upgrade, build and sign five installers, verify the GitHub draft, "
-            "then publish the GitHub release, website, and application update feed. Run the Windows installer and "
-            "in-place upgrade check against the live release.")
+            "then publish the GitHub release, website, and application update feed. Run all five native installer "
+            "and in-place upgrade checks against the live release.")
         log(f"Local checkpoint directory {state_dir}")
         return
     if sys.platform != "darwin":
@@ -401,9 +401,9 @@ def release(args):
             raise ReleaseError("The release checkpoint has changed. Run the same command again.")
         require_main_ancestor(ROOT, commit)
         try:
-            git(ROOT, "cat-file", "-e", f"{commit}:.github/workflows/{WINDOWS_LIVE_WORKFLOW}", capture=True)
+            git(ROOT, "cat-file", "-e", f"{commit}:.github/workflows/{LIVE_RELEASE_WORKFLOW}", capture=True)
         except subprocess.CalledProcessError as exc:
-            raise ReleaseError("The reviewed Wardr commit must include the Windows live release workflow.") from exc
+            raise ReleaseError("The reviewed Wardr commit must include the native live release workflow.") from exc
         key = verify_key(commit, args.signing_key)
         wait_checks(commit, args.timeout)
         if not state:
@@ -422,8 +422,8 @@ def release(args):
         check_candidate_upgrade(args.site, state_dir, source, wheel, state, key)
         publish(args.site, worktrees / "site", source, packages, installers, windows_sha, state, args)
         worktrees.rmdir()
-        verify_windows_release(state_dir, state, args)
-    log(f"Wardr {version} is live at https://getwardr.com/#release. The Windows live upgrade passed.")
+        verify_live_upgrade(state_dir, state, args)
+    log(f"Wardr {version} is live at https://getwardr.com/#release. All five native live upgrade checks passed.")
 
 
 def main():
@@ -434,7 +434,7 @@ def main():
     parser.add_argument("--signing-key", type=lambda value: Path(value).expanduser().resolve(), required=True)
     parser.add_argument("--timeout", type=int, default=5400, help="Seconds to wait for each group of CI jobs.")
     parser.add_argument("--plan", action="store_true", help="Show the pinned release plan without making changes.")
-    parser.add_argument("--retry-failed", action="store_true", help="Retry failed signing or Windows live verification jobs.")
+    parser.add_argument("--retry-failed", action="store_true", help="Retry failed signing or native live verification jobs.")
     args = parser.parse_args()
     try:
         if args.timeout < 1:

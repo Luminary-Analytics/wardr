@@ -57,14 +57,14 @@ release environment.
 The runner uploads and verifies the artifacts on a GitHub draft, stages and
 validates the site with the signed release and installer catalogs, promotes
 the draft, and pushes the site to Render. After verifying the deployed site
-and downloads, it runs the Windows live release smoke test and waits for it
-to pass. That test checks the new published Setup and upgrades the prior
-published Setup through the actual dashboard and signed feed. The baseline
-comes from the signed prior feed in the release checkpoint.
+and downloads, it verifies fresh native installs and live in-place upgrades
+on Windows x64, macOS ARM64 and Intel, and Linux ARM64 and x64. The baseline
+comes from the signed prior feed in the release checkpoint. Each upgrade
+checks that settings and saved data survive the dashboard restart.
 
-A failed Windows check is reported after publication. Rerun the release
-command to use the recorded Actions run, or add `--retry-failed` to rerun
-failed Windows verification. [Development and release guide](../docs/DEVELOPMENT.md#publish-a-release)
+The runner waits for all five jobs and reports any failure after publication.
+Rerun the release command to use the recorded Actions run, or add
+`--retry-failed` to rerun failed jobs. [Development and release guide](../docs/DEVELOPMENT.md#publish-a-release)
 
 ## Build preview installers
 

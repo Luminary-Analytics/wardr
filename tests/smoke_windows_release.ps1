@@ -170,7 +170,8 @@ $baselineInstall = Join-Path $scratch 'upgrade baseline install'
 $activeInstall = $null
 try {
     New-Item -ItemType Directory -Path $downloads | Out-Null
-    & python -I (Join-Path $PSScriptRoot 'fetch_windows_release.py') --output $downloads $BaselineVersion $TargetVersion
+    & python -I (Join-Path $PSScriptRoot 'fetch_live_release.py') `
+        --platform windows --arch x64 --output $downloads $BaselineVersion $TargetVersion
     if ($LASTEXITCODE -ne 0) {
         throw "Fetching and verifying live signed release files failed ($LASTEXITCODE)."
     }

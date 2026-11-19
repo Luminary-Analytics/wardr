@@ -54,7 +54,7 @@ retained launch port and monitoring interval, saved assessment, advisory
 catalog, event history, and exported report. The release command waits for
 this check and reuses its recorded run on resume. Use `--retry-failed` to
 retry a failed Windows run after publication.
-[Windows live release workflow](../../.github/workflows/windows-live-release.yml) · [Release guide](../../docs/DEVELOPMENT.md#publish-a-release)
+[Native live release workflow](../../.github/workflows/live-release.yml) · [Release guide](../../docs/DEVELOPMENT.md#publish-a-release)
 
 ## Authenticode release signing
 

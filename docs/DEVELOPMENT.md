@@ -121,17 +121,19 @@ check the Render deploy log and rerun the same command after resolving it.
    status, pushes the site for Render to deploy, then verifies the live
    site, feed, and downloads over HTTPS.
    [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
-4. After Render verification, it runs the Windows live release smoke test and
-   waits for a successful result. The baseline version comes from the signed
-   prior feed saved in the release checkpoint. For the release after 0.2.2,
-   the workflow uses the published 0.2.2 Windows Setup and upgrades it through
-   the dashboard against the production feed. It also tests the new Setup and
-   checks that the upgrade preserves settings and saved data.
-   [Windows live release workflow](../.github/workflows/windows-live-release.yml)
+4. After Render verification, it runs live checks on Windows x64, Apple Silicon
+   and Intel Macs, and Linux ARM64 and x64. Each job verifies the published
+   installer against its signed catalog and checks a fresh target installation.
+   Windows checks timestamped Authenticode. macOS checks Developer ID and
+   notarization. Each job then installs the previous published version from the
+   signed feed recorded in the release checkpoint, upgrades it through the
+   live dashboard, and checks that settings and saved data survive the restart.
+   [Native live release workflow](../.github/workflows/live-release.yml)
 
-If the Windows check fails, the command reports a verification error after
-the target is publicly live. Rerun the same command to resume the recorded
-Actions run. Add `--retry-failed` to rerun failed Windows verification.
+The release command waits for all five checks. A failure is reported after the
+target is publicly live. Rerun the same command to resume the recorded Actions
+run. Add `--retry-failed` to rerun failed jobs while the target is still the live
+version.
 
 Keep the Wardr release key local and outside the repositories. Keep platform
 signing credentials in the protected private release environment. Installed

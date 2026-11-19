@@ -184,10 +184,10 @@ class DraftReleaseTests(unittest.TestCase):
         self.assertEqual(self.writes, [])
 
 
-class WindowsLiveSmokeTests(unittest.TestCase):
+class LiveReleaseSmokeTests(unittest.TestCase):
     baseline = "0.3.3"
     run_id = 321
-    workflow = "windows-live-release.yml"
+    workflow = "live-release.yml"
     endpoint = f"repos/Luminary-Analytics/wardr/actions/runs/{run_id}"
     run_url = f"https://github.com/Luminary-Analytics/wardr/actions/runs/{run_id}"
 
@@ -204,7 +204,7 @@ class WindowsLiveSmokeTests(unittest.TestCase):
             "head_branch": f"v{VERSION}",
             "head_sha": COMMIT,
             "event": "workflow_dispatch",
-            "display_title": f"Wardr Windows live upgrade {self.baseline} to {VERSION}",
+            "display_title": f"Wardr live upgrade {self.baseline} to {VERSION}",
             "status": "completed",
             "conclusion": "success",
             "run_attempt": 1,
@@ -212,11 +212,11 @@ class WindowsLiveSmokeTests(unittest.TestCase):
         }
 
     def wait_for_run(self, **options):
-        github.wait_windows_live(self.run_id, VERSION, COMMIT, 60, baseline=self.baseline, **options)
+        github.wait_live_release(self.run_id, VERSION, COMMIT, 60, baseline=self.baseline, **options)
 
     def test_dispatch_uses_exact_release_tag_and_version_pair(self):
         self.api.return_value = {"workflow_run_id": self.run_id}
-        self.assertEqual(github.dispatch_windows_live(self.baseline, VERSION), self.run_id)
+        self.assertEqual(github.dispatch_live_release(self.baseline, VERSION), self.run_id)
         self.api.assert_called_once_with(
             f"repos/Luminary-Analytics/wardr/actions/workflows/{self.workflow}/dispatches",
             "--method", "POST", "--header", "X-GitHub-Api-Version: 2026-03-10",
@@ -228,14 +228,14 @@ class WindowsLiveSmokeTests(unittest.TestCase):
     def test_dispatch_rejects_unsafe_inputs_without_contacting_github(self):
         for baseline, version in ((VERSION, VERSION), ("0.3.5", VERSION), (self.baseline, "main")):
             with self.subTest(baseline=baseline, version=version), self.assertRaises(github.ReleaseError):
-                github.dispatch_windows_live(baseline, version)
+                github.dispatch_live_release(baseline, version)
         self.api.assert_not_called()
 
     def test_dispatch_requires_a_valid_run_id(self):
         for response in (None, {}, {"workflow_run_id": True}, {"workflow_run_id": "321"}, {"workflow_run_id": 0}):
             with self.subTest(response=response), self.assertRaisesRegex(github.ReleaseError, "valid workflow run ID"):
                 self.api.return_value = response
-                github.dispatch_windows_live(self.baseline, VERSION)
+                github.dispatch_live_release(self.baseline, VERSION)
 
     def test_wait_polls_pending_run_until_the_pinned_run_succeeds(self):
         self.api.side_effect = (
@@ -254,8 +254,9 @@ class WindowsLiveSmokeTests(unittest.TestCase):
             {"head_branch": f"v{self.baseline}"},
             {"head_sha": "b" * 40},
             {"event": "push"},
-            {"display_title": f"Wardr Windows live upgrade 0.3.2 to {VERSION}"},
+            {"display_title": f"Wardr live upgrade 0.3.2 to {VERSION}"},
             {"path": ".github/workflows/update-smoke.yml"},
+            {"path": ".github/workflows/windows-live-release.yml"},
             {"path": f".github/workflows/{self.workflow}@refs/heads/main"},
         )
         for wrong in changes:
@@ -285,7 +286,7 @@ class WindowsLiveSmokeTests(unittest.TestCase):
             self.run_response(status="queued", conclusion=None),
             github.ReleaseError("gh: Not Found (HTTP 404)"),
         )
-        with self.assertRaisesRegex(github.ReleaseError, "Could not read the Windows live smoke run"):
+        with self.assertRaisesRegex(github.ReleaseError, "Could not read the live release run"):
             self.wait_for_run()
         self.assertEqual(self.api.call_count, 2)
         self.sleep.assert_called_once()
