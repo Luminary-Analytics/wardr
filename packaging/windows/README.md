@@ -38,3 +38,34 @@ if ($LASTEXITCODE -ne 0) { throw 'Installed Wardr cannot update its private envi
 ```
 
 Uninstall Wardr from Windows **Installed apps**. Setup removes its launcher and owned runtime folders. Reports and settings in `%LOCALAPPDATA%\Wardr` are retained. Windows Setup logs are available in `%TEMP%`.
+
+## Authenticode release signing
+
+Use a Windows signing machine with Windows SDK `signtool.exe` and the official Microsoft Artifact Signing client. Complete organization identity validation, create a **Public Trust** certificate profile, and assign **Artifact Signing Certificate Profile Signer** for that profile to the signing identity. Record the full certificate subject from the approved profile independently of the file you are verifying. [Microsoft Artifact Signing setup](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart) · [Signing client setup](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)
+
+The client metadata file specifies the region endpoint, account name and certificate profile name. Authenticate on the Windows signing machine through the client or through GitHub Actions with OpenID Connect. Keep credentials out of the metadata file, source control and build output. [Microsoft’s GitHub Actions integration](https://github.com/Azure/artifact-signing-action)
+
+For new release builds, pass `'/DWardrSignTool'` to the build command and configure the named Inno Setup Sign Tool. The tool signs Setup and the uninstaller during compilation. Here `$signTool`, `$dlib` and `$metadata` are the absolute paths to SDK SignTool, the Artifact Signing client library and its metadata file.
+
+```powershell
+$signingCommand = 'wardr=$q{0}$q sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib $q{1}$q /dmdf $q{2}$q $f' -f $signTool, $dlib, $metadata
+ISCC.exe "/DWardrVersion=$version" "/DWardrPayload=$payload" '/DWardrArch=x64' '/DWardrSignTool' "/S$signingCommand" "/O$output" packaging/windows/wardr.iss
+if ($LASTEXITCODE -ne 0) { throw 'Unable to build and sign Wardr Setup' }
+```
+
+To sign an existing tested installer’s outer executable, pass its approved unsigned SHA-256 and an existing output directory. The script creates and verifies a separate signed copy. The compiled installer’s embedded uninstaller and temporary Setup copies need compile-time signing for their own signatures. [Inno Setup SignTool](https://jrsoftware.org/ishelp/topic_setup_signtool.htm)
+
+```powershell
+./packaging/windows/Authenticode.ps1 -Installer $setup -ExpectedSha256 $approvedUnsignedSha256 `
+  -ExpectedPublisherSubject $approvedSubject -SignToolPath $signTool `
+  -AzureDlibPath $dlib -AzureMetadataPath $metadata -OutputDirectory $signedOutput -Json
+```
+
+Verify the final release installer on a current, clean Windows machine. Run the same verification for the installed `unins000.exe` from the signed setup smoke test. The output includes the final SHA-256, exact signer subject, certificate thumbprint and timestamp signer.
+
+```powershell
+./packaging/windows/Authenticode.ps1 -Installer $signedSetup `
+  -ExpectedPublisherSubject $approvedSubject -SignToolPath $signTool -Json
+```
+
+In Windows File Explorer, use **Properties → Digital Signatures → Details** to confirm the trusted signature and the verified publisher’s legal name. The Windows SDK verifies embedded trust with `signtool verify /pa /all /tw /v`. Use the returned SHA-256 of the signed installer in release metadata. [Microsoft SignTool verification](https://learn.microsoft.com/en-us/windows/win32/seccrypto/using-signtool-to-verify-a-file-signature)

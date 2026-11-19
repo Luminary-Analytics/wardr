@@ -46,6 +46,10 @@ SolidCompression=yes
 OutputDir=..\..\dist
 OutputBaseFilename=wardr-{#WardrVersion}-windows-{#WardrArch}-setup
 VersionInfoVersion={#WardrVersion}
+#ifdef WardrSignTool
+SignTool=wardr
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "{#WardrPayload}\python\*"; DestDir: "{tmp}\payload\python"; Flags: dontcopy noencryption recursesubdirs

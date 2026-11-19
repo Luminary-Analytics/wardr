@@ -40,12 +40,12 @@ packages pinned runtime downloads from Astral. Each job runs the produced
 installer and exercises a test-signed upgrade in the installed copy. The
 temporary update wheel and signing key stay in the test job.
 
-The workflow uploads preview installers as GitHub Actions artifacts. The
-Windows EXE does not carry an Authenticode signature, and the macOS preview
-uses ad-hoc signing without an Apple Developer ID or notarization. A public
-desktop release requires separate platform signing credentials for Windows
-and macOS. Keep publisher keys out of the repository and retain the existing
-Wardr release key for application updates. [Apple packaging and notarization](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution) · [Windows signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
+The workflow uploads preview installers as GitHub Actions artifacts. For a
+public release, use the Windows signing guide to sign and verify Setup on
+Windows. Follow the Mac signing guide to sign the app and its bundled runtime
+before submitting and stapling each disk image. Keep publisher keys out of
+the repository and retain the existing Wardr release key for application
+updates. [Windows signing](windows/README.md#authenticode-release-signing) · [Mac signing and notarization](macos/README.md)
 
 On a native macOS build host with command-line developer tools installed,
 run the commands below. The Intel build also needs Rust and Homebrew's
