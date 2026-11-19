@@ -79,10 +79,12 @@ def build_signed_feed(root, baseline):
                 continue
             data = original.read(original_name)
             if entry == target_info + "METADATA":
-                original_version = f"Version: {current}\n".encode()
-                assert original_version in data, "Baseline metadata does not match its version"
-                data = data.replace(original_version, f"Version: {target}\n".encode(), 1)
-                python_floor = re.search(rb"^Requires-Python: (.+)$", data, re.M).group(1).decode()
+                version = re.search(rb"^Version: ([^\r\n]+)", data, re.M)
+                requirement = re.search(rb"^Requires-Python: ([^\r\n]+)", data, re.M)
+                assert version and version.group(1).decode() == current, "Baseline metadata does not match its version"
+                assert requirement, "Baseline metadata does not declare a Python requirement"
+                data = data[:version.start(1)] + target.encode() + data[version.end(1):]
+                python_floor = requirement.group(1).decode()
             if entry == "wardr/static/index.html":
                 data += b"\n" + MARKER + b"\n"
             fixture.writestr(entry, data)
@@ -143,8 +145,8 @@ def launch_link(log, count, process):
         if len(matches) >= count:
             port, token = matches[count - 1]
             return int(port), token
-        if count == 1 and process.poll() is not None:
-            raise RuntimeError(f"Dashboard exited with code {process.returncode} before its initial launch")
+        if (count == 1 or os.name != "nt") and process.poll() is not None:
+            raise RuntimeError(f"Dashboard exited with code {process.returncode} before launch {count}")
         time.sleep(0.1)
     raise RuntimeError(f"Dashboard did not announce launch {count}")
 

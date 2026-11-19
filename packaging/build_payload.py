@@ -75,6 +75,32 @@ def runtime(stage):
     return stage / ("python/python.exe" if os.name == "nt" else "python/bin/python3")
 
 
+def stage_dependencies(python, wheel, wheelhouse):
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith(("PYTHON", "PIP_"))}
+    env["PIP_CONFIG_FILE"] = os.devnull
+    pip = [str(python), "-I", "-m", "pip", "--isolated", "--disable-pip-version-check"]
+    index = ["--index-url", "https://pypi.org/simple"]
+    crypto = "cryptography==50.0.2"
+    platform_options = []
+    if platform.system() == "Linux":
+        platform_options = ["--platform", f"manylinux2014_{platform.machine()}"]
+    elif platform.system() == "Darwin" and platform.machine() == "x86_64":
+        # PyCA publishes Apple Silicon wheels. Build the Intel wheel with static OpenSSL.
+        openssl = subprocess.check_output(["brew", "--prefix", "openssl@3"], text=True, timeout=30).strip()
+        subprocess.run(
+            [*pip, "wheel", *index, "--wheel-dir", str(wheelhouse), "--no-deps", "--no-binary",
+             "cryptography", crypto],
+            check=True, env={**env, "OPENSSL_STATIC": "1", "OPENSSL_DIR": openssl,
+                             "MACOSX_DEPLOYMENT_TARGET": "13.0"}, timeout=600,
+        )
+    subprocess.run(
+        [*pip, "download", *index, "--only-binary=:all:", *platform_options, "--find-links", str(wheelhouse),
+         "--dest", str(wheelhouse), str(wheel), crypto, "cffi==2.0.0", "pycparser==3.12"],
+        check=True, env=env, timeout=150,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -92,18 +118,7 @@ def main():
         wheelhouse = stage / "wheelhouse"
         wheelhouse.mkdir()
         wheel = published_wheel(args.version, wheelhouse)
-        python = runtime(stage)
-        env = {key: value for key, value in os.environ.items()
-               if not key.upper().startswith(("PYTHON", "PIP_"))}
-        env["PIP_CONFIG_FILE"] = os.devnull
-        target_options = ["--platform", f"manylinux2014_{platform.machine()}"] if platform.system() == "Linux" else []
-        subprocess.run(
-            [str(python), "-I", "-m", "pip", "--isolated", "--disable-pip-version-check",
-             "download", "--index-url", "https://pypi.org/simple", "--only-binary=:all:",
-             *target_options, "--dest", str(wheelhouse), str(wheel), "cryptography==50.0.2",
-             "cffi==2.0.0", "pycparser==3.12"],
-            check=True, env=env, timeout=150,
-        )
+        stage_dependencies(runtime(stage), wheel, wheelhouse)
         shutil.copyfile(HERE / "install.py", stage / "install.py")
         stage.rename(output)
     print(f"Staged Wardr {args.version} for {platform.system()} {platform.machine()}.")

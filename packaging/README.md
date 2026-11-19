@@ -47,7 +47,9 @@ desktop release requires separate platform signing credentials for Windows
 and macOS. Keep publisher keys out of the repository and retain the existing
 Wardr release key for application updates. [Apple packaging and notarization](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution) · [Windows signing options](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
 
-On a native macOS build host with command-line developer tools installed:
+On a native macOS build host with command-line developer tools installed,
+run the commands below. The Intel build also needs Rust and Homebrew's
+`openssl@3` to compile PyCA cryptography with static OpenSSL. [PyCA build instructions](https://cryptography.io/en/latest/installation/#building-cryptography-on-macos)
 
 ```sh
 python -m pip install cryptography==50.0.2
