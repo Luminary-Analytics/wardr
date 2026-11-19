@@ -31,12 +31,12 @@ To install from the wheel, use Python 3.11 or later and run these commands
 from your downloads folder. [Set up pipx](https://pipx.pypa.io/stable/)
 
 ```console
-pipx install ./wardr-0.2.3-py3-none-any.whl
+pipx install ./wardr-0.2.4-py3-none-any.whl
 wardr
 ```
 
-To upgrade from v0.2.0, close Wardr, download the v0.2.3 wheel, and run
-`pipx install --force ./wardr-0.2.3-py3-none-any.whl` once. Launch Wardr again
+To upgrade from v0.2.0, close Wardr, download the v0.2.4 wheel, and run
+`pipx install --force ./wardr-0.2.4-py3-none-any.whl` once. Launch Wardr again
 as the account whose security settings you want to check.
 
 ## Dashboard
@@ -173,7 +173,7 @@ verifies downloads offline using PyCA cryptography without an OpenSSL
 command. [Release downloads](https://getwardr.com/#release)
 
 ```console
-wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.2.3-py3-none-any.whl
+wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.2.4-py3-none-any.whl
 ```
 
 See the [security policy](SECURITY.md) for private vulnerability reporting and
