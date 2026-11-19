@@ -31,7 +31,35 @@ interval, software assessment, cached advisory catalog, saved event, and
 exported report. It also checks that the restarted dashboard issues a fresh
 access token and uses the new package.
 
-## Build and distribute
+## Sign and publish a release
+
+Push the reviewed software commit containing the new `pyproject.toml` version
+to the public repository's `main` branch. Wait for the required builds and
+tests to pass, then run this from the Wardr software checkout.
+
+```sh
+python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
+```
+
+Use `--plan` for a read-only preview. Run the same command again to resume a
+release and use `--retry-failed` to retry failed cloud jobs. The runner keeps
+release artifacts and progress in `dist/release/X.Y.Z`.
+
+The runner seals the wheel and source archive and verifies the in-place
+upgrade from the current signed wheel to the candidate, including the state
+saved across restart. It stages the request and sealed wheel on the existing
+private signing repository's `main` branch and a release tag. Windows,
+macOS, and Linux CI build and test the installers. Windows CI signs Setup,
+and macOS CI signs, notarizes, and staples the disk images. The Wardr release
+key stays local. Platform signing credentials stay in the protected private
+release environment.
+
+The runner uploads and verifies the artifacts on a GitHub draft, stages and
+validates the site with the signed release and installer catalogs, promotes
+the draft, and pushes the site to Render. It completes when the live site
+serves the expected signed catalogs and downloads. [Development and release guide](../docs/DEVELOPMENT.md#publish-a-release)
+
+## Build preview installers
 
 Run the **Wardr native installers** GitHub Actions workflow for a Community
 version already published on getwardr.com. It verifies the release signature
@@ -40,12 +68,9 @@ packages pinned runtime downloads from Astral. Each job runs the produced
 installer and exercises a test-signed upgrade in the installed copy. The
 temporary update wheel and signing key stay in the test job.
 
-The workflow uploads preview installers as GitHub Actions artifacts. For a
-public release, use the Windows signing guide to sign and verify Setup on
-Windows. Follow the Mac signing guide to sign the app and its bundled runtime
-before submitting and stapling each disk image. Keep publisher keys out of
-the repository and retain the existing Wardr release key for application
-updates. [Windows signing](windows/README.md#authenticode-release-signing) · [Mac signing and notarization](macos/README.md)
+The workflow uploads preview installers as GitHub Actions artifacts. The
+platform guides describe Windows Authenticode verification and macOS signing
+and notarization. [Windows signing](windows/README.md#authenticode-release-signing) · [Mac signing and notarization](macos/README.md)
 
 On a native macOS build host with command-line developer tools installed,
 run the commands below. The Intel build also needs Rust and Homebrew's

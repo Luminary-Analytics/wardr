@@ -47,4 +47,13 @@ jobs:
       - name: Install, update, and restart both release wheels locally
         shell: bash
         run: |
-          "${WARDR_SMOKE_PYTHON:-python}" tests/smoke_update.py baseline/*.whl dist/*.whl
+          set -euo pipefail
+          python_bin="${WARDR_SMOKE_PYTHON:-python}"
+          baseline=(baseline/*.whl)
+          candidate=(dist/*.whl)
+          test "${#baseline[@]}" -eq 1 && test "${#candidate[@]}" -eq 1
+          if [[ "${baseline[0]##*/}" == "${candidate[0]##*/}" ]]; then
+            "$python_bin" tests/smoke_update.py "${baseline[0]}" "${candidate[0]}"
+          else
+            "$python_bin" tests/smoke_update.py "${baseline[0]}" --candidate "${candidate[0]}"
+          fi

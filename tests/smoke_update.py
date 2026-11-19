@@ -62,13 +62,14 @@ if sys.orig_argv[1:4] == ["-I", "-m", "wardr"] and "WARDR_SMOKE_FEED" in os.envi
 '''
 
 
-def build_signed_feed(root, baseline):
-    version_match = re.fullmatch(r"wardr-(\d+)\.(\d+)\.(\d+)-py3-none-any\.whl", baseline.name)
-    assert version_match, "Use a Wardr release wheel"
-    major, minor, patch = map(int, version_match.groups())
-    current = f"{major}.{minor}.{patch}"
-    target = f"{major}.{minor}.{patch + 1}"
-    name = f"wardr-{target}-py3-none-any.whl"
+def wheel_version(path):
+    match = re.fullmatch(r"wardr-((?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2})-py3-none-any\.whl", path.name)
+    if not match:
+        raise ValueError("Use a canonical Wardr release wheel.")
+    return match.group(1)
+
+
+def fixture_wheel(baseline, current, target):
     original_info, target_info = f"wardr-{current}.dist-info/", f"wardr-{target}.dist-info/"
     records = []
     output = io.BytesIO()
@@ -84,7 +85,6 @@ def build_signed_feed(root, baseline):
                 assert version and version.group(1).decode() == current, "Baseline metadata does not match its version"
                 assert requirement, "Baseline metadata does not declare a Python requirement"
                 data = data[:version.start(1)] + target.encode() + data[version.end(1):]
-                python_floor = requirement.group(1).decode()
             if entry == "wardr/static/index.html":
                 data += b"\n" + MARKER + b"\n"
             fixture.writestr(entry, data)
@@ -93,7 +93,29 @@ def build_signed_feed(root, baseline):
         record = io.StringIO()
         csv.writer(record, lineterminator="\n").writerows([*records, (target_info + "RECORD", "", "")])
         fixture.writestr(target_info + "RECORD", record.getvalue())
-    wheel = output.getvalue()
+    return output.getvalue()
+
+
+def build_signed_feed(root, baseline, candidate=None):
+    current = wheel_version(baseline)
+    major, minor, patch = map(int, current.split("."))
+    if candidate is None:
+        target = f"{major}.{minor}.{patch + 1}"
+        wheel = fixture_wheel(baseline, current, target)
+    else:
+        target = wheel_version(candidate)
+        if tuple(map(int, target.split("."))) <= (major, minor, patch):
+            raise ValueError("The candidate wheel must be newer than the installed release.")
+        wheel = candidate.read_bytes()
+    name = f"wardr-{target}-py3-none-any.whl"
+    with ZipFile(baseline) as original, ZipFile(io.BytesIO(wheel)) as updated:
+        metadata = updated.read(f"wardr-{target}.dist-info/METADATA")
+        version = re.search(rb"^Version: ([^\r\n]+)", metadata, re.M)
+        requirement = re.search(rb"^Requires-Python: ([^\r\n]+)", metadata, re.M)
+        assert version and version.group(1).decode() == target and requirement, "Invalid candidate metadata"
+        python_floor = requirement.group(1).decode()
+        before_html = original.read("wardr/static/index.html")
+        after_html = updated.read("wardr/static/index.html")
     signature, download = f"/releases/{target}/release.json.sig", f"/downloads/{name}"
     manifest = json.dumps({
         "schema_version": 1, "channel": "community", "version": target,
@@ -104,7 +126,7 @@ def build_signed_feed(root, baseline):
     (root / "fixture-release-key.pem").write_bytes(
         signer.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
     )
-    return current, target, {LATEST: manifest, signature: signer.sign(manifest), download: wheel}
+    return current, target, {LATEST: manifest, signature: signer.sign(manifest), download: wheel}, before_html, after_html
 
 
 def secure_fixture(root, server, server_names):
@@ -263,7 +285,7 @@ def stop_dashboard(process, root):
             process.wait(timeout=10)
 
 
-def upgrade(root, python, feed_port, cert, current, target):
+def upgrade(root, python, feed_port, cert, current, target, before_html, after_html):
     state = root / "device-state"
     saved, history, event = seed_state(state)
     port = launch_port()
@@ -282,13 +304,13 @@ def upgrade(root, python, feed_port, cert, current, target):
             assert old_port == port, "Dashboard ignored the selected port"
             status = await_update_state(port, token, "idle")
             assert status["current_version"] == current and status["can_check"], "Baseline cannot update"
-            assert MARKER not in request(port, token, "/")[1], "Baseline served fixture assets"
+            assert request(port, token, "/")[1] == before_html, "Baseline dashboard differs from its wheel"
             assert request(port, token, "/api/update/check", {})[0] == 202, "Update check failed"
             assert await_update_state(port, token, "available")["available_version"] == target, "Signed update was not offered"
             assert request(port, token, "/api/update/install", {"version": target})[0] == 202, "Install was refused"
             status = await_update_state(port, token, "installed")
             assert (status["current_version"], status["installed_version"]) == (current, target), "Unexpected install result"
-            assert MARKER not in request(port, token, "/")[1], "Dashboard switched assets before restart"
+            assert request(port, token, "/")[1] == before_html, "Dashboard switched assets before restart"
             assert request(port, token, "/api/update/restart", {})[0] == 202, "Restart was refused"
 
             new_port, new_token = launch_link(log, 2, process)
@@ -296,7 +318,7 @@ def upgrade(root, python, feed_port, cert, current, target):
             assert new_token != token, "Restart reused the original token"
             assert request(port, token, "/api/update")[0] == 403, "The old token still grants access"
             assert await_update_state(port, new_token, "idle")["current_version"] == target, "Dashboard did not restart into the new wheel"
-            assert MARKER in request(port, new_token, "/")[1], "Restarted dashboard did not serve updated assets"
+            assert request(port, new_token, "/")[1] == after_html, "Restarted dashboard differs from the candidate wheel"
             _, defense = request(port, new_token, "/api/defense")
             assert defense["software"]["result"]["inventory"]["name"] == SENTINEL, "Saved software assessment was not loaded"
             _, status = request(port, new_token, "/api/status")
@@ -337,10 +359,10 @@ def disposable_directory():
                 time.sleep(0.25)
 
 
-def smoke(baseline, installed_python=None):
+def smoke(baseline, installed_python=None, candidate=None):
     with disposable_directory() as root:
         python = installed_python or install_baseline(root, baseline)
-        current, target, feed = build_signed_feed(root, baseline)
+        current, target, feed, before_html, after_html = build_signed_feed(root, baseline, candidate)
         fetched, server_names = [], []
 
         class FeedHandler(BaseHTTPRequestHandler):
@@ -364,7 +386,7 @@ def smoke(baseline, installed_python=None):
             worker.start()
             try:
                 with fixture_transport(python):
-                    upgrade(root, python, server.server_port, cert, current, target)
+                    upgrade(root, python, server.server_port, cert, current, target, before_html, after_html)
             finally:
                 server.shutdown()
                 worker.join()
@@ -378,12 +400,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheels", metavar="WHEEL", nargs="+", type=Path)
     parser.add_argument("--installed-python", type=Path, help="Python in a disposable environment already provisioned from WHEEL")
+    parser.add_argument("--candidate", type=Path, help="Exercise an update to these exact newer wheel bytes")
     arguments = parser.parse_args()
-    if arguments.installed_python and len(arguments.wheels) != 1:
-        parser.error("--installed-python requires exactly one baseline wheel")
+    if (arguments.installed_python or arguments.candidate) and len(arguments.wheels) != 1:
+        parser.error("--installed-python and --candidate each require exactly one baseline wheel")
     # Exception context and captured dashboard output can include launch tokens.
     try:
         for wheel in arguments.wheels:
-            smoke(wheel.resolve(), arguments.installed_python)
+            smoke(wheel.resolve(), arguments.installed_python, arguments.candidate)
     except Exception as error:
         raise SystemExit(f"{type(error).__name__}: {error}") from None

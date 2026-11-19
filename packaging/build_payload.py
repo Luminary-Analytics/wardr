@@ -63,6 +63,19 @@ def published_wheel(version, folder):
     return folder / name
 
 
+def staged_wheel(version, folder, source, expected_digest):
+    name = f"wardr-{version}-py3-none-any.whl"
+    if source.name != name or source.is_symlink() or not source.is_file():
+        raise ValueError(f"Supply the reviewed release wheel named {name}.")
+    with source.open("rb") as handle:
+        wheel = handle.read(20 * 1024 * 1024 + 1)
+    if not 0 < len(wheel) <= 20 * 1024 * 1024 or sha256(wheel).hexdigest() != expected_digest:
+        raise ValueError("The release wheel differs from the protected signing request.")
+    path = folder / name
+    path.write_bytes(wheel)
+    return path
+
+
 def runtime(stage):
     target, digest = RUNTIMES[(platform.system(), platform.machine())]
     name = f"cpython-{PYTHON_VERSION}%2B{RUNTIME_RELEASE}-{target}-install_only_stripped.tar.gz"
@@ -105,9 +118,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--wheel", type=Path, help="Use the wheel from a protected release request.")
+    parser.add_argument("--wheel-sha256", help="SHA-256 from the same protected release request.")
     args = parser.parse_args()
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version):
+    if not re.fullmatch(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}", args.version):
         parser.error("Expected a stable major.minor.patch release version.")
+    if (args.wheel is None) != (args.wheel_sha256 is None) or (
+        args.wheel_sha256 is not None and not re.fullmatch(r"[a-f0-9]{64}", args.wheel_sha256)
+    ):
+        parser.error("--wheel and a lowercase SHA-256 in --wheel-sha256 must be supplied together.")
     output = args.output.absolute()
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists() or output.is_symlink():
@@ -117,7 +136,10 @@ def main():
         stage.mkdir()
         wheelhouse = stage / "wheelhouse"
         wheelhouse.mkdir()
-        wheel = published_wheel(args.version, wheelhouse)
+        if args.wheel is None:
+            wheel = published_wheel(args.version, wheelhouse)
+        else:
+            wheel = staged_wheel(args.version, wheelhouse, args.wheel, args.wheel_sha256)
         stage_dependencies(runtime(stage), wheel, wheelhouse)
         shutil.copyfile(HERE / "install.py", stage / "install.py")
         stage.rename(output)

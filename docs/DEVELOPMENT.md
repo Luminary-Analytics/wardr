@@ -87,26 +87,41 @@ platform-independent Python with platform-specific behavior selected at
 runtime. The product version lives in [pyproject.toml](../pyproject.toml).
 Blender is only needed to edit or re-render the supplied brand assets.
 
-## Release and website handoff
+## Publish a release
 
-1. Confirm the intended version in `pyproject.toml` and check the native CI
-   results. Build the wheel and source archive from the intended software
-   revision. Confirm the wheel includes `wardr/keys/release.pem` and sign
-   with its corresponding private key.
-2. Prepare the GitHub release with the wheel and archive from `dist/`.
-   Use that same software checkout and artifacts to build the company site.
-3. In the site checkout, run its release build and validation. It stages the
-   downloads, SHA-256 checksums, versioned release manifest, and detached
-   Ed25519 signature. The signing step uses OpenSSL 3. Publish the validated
-   site files through the site's Render Blueprint. [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
-4. On the public site, verify that the download points to the intended
-   wheel from both the homepage and the verified demo. Use
-   `wardr verify-release` with the downloaded manifest, versioned signature,
-   and a separately trusted Ed25519 public key. Check the live feed from a
-   clean install of the new wheel. [Wardr homepage](https://getwardr.com/)
+Use a maintainer Mac with Python 3.11 or newer, uv, Git, GitHub CLI, OpenSSL 3
+on `PATH`, and Xcode command-line tools for `codesign` and `xcrun stapler`.
+Authenticate GitHub CLI as a maintainer who can push to all three repositories
+and create the protected signing tag. Review the new version in
+`pyproject.toml` and push the reviewed commit to the public Wardr repository's
+`main` branch. From that commit, run the release with the company site checkout,
+the existing private signing checkout, and the local Wardr release key.
 
-Wardr 0.2.0 users install the 0.2.1 wheel manually. Test an in-place upgrade
-using a disposable installation with the updater and a newer signed release.
-Keep the release signing key outside both repositories and Render. Consumers
-verify using PyCA cryptography, which runs without an external OpenSSL
-command. [Security policy](../SECURITY.md)
+```console
+python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
+```
+
+Add `--plan` for a read-only preview. Rerun the same command to resume, and
+add `--retry-failed` to retry failed cloud jobs. Keep the sealed artifacts and
+saved progress in `dist/release/X.Y.Z` until the release is live. If the site
+or update feed is still serving the previous release after the deploy check,
+check the Render deploy log and rerun the same command after resolving it.
+
+1. The runner seals the exact wheel and source archive from the reviewed
+   commit. It tests an in-place upgrade from the currently published signed
+   wheel to the candidate in a disposable installation and checks that saved
+   state survives the restart.
+2. It stages the request and sealed wheel on `main` and a release tag in the
+   existing private signing repository. Its Windows, macOS, and Linux jobs
+   build and test the native installers and run the platform signing steps.
+3. It uploads the verified artifacts to a GitHub draft, checks the uploaded
+   bytes, and stages and validates the company site with signed app and
+   installer catalogs. It publishes the draft, pushes the site for Render
+   to deploy, then verifies the live site, feed, and downloads over HTTPS.
+   [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
+
+Keep the Wardr release key local and outside the repositories. Keep platform
+signing credentials in the protected private release environment. Installed
+Wardr clients verify the signed feed on getwardr.com using PyCA cryptography.
+Wardr 0.2.0 users can install the current wheel manually to get in-app
+updates. [Security policy](../SECURITY.md)
