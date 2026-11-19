@@ -46,4 +46,5 @@ jobs:
           echo "WARDR_SMOKE_PYTHON=$RUNNER_TEMP/wardr-smoke/bin/python" >> "$GITHUB_ENV"
       - name: Install, update, and restart both release wheels locally
         shell: bash
-        run: "${WARDR_SMOKE_PYTHON:-python}" tests/smoke_update.py baseline/*.whl dist/*.whl
+        run: |
+          "${WARDR_SMOKE_PYTHON:-python}" tests/smoke_update.py baseline/*.whl dist/*.whl
