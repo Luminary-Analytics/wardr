@@ -39,6 +39,23 @@ if ($LASTEXITCODE -ne 0) { throw 'Installed Wardr cannot update its private envi
 
 Uninstall Wardr from Windows **Installed apps**. Setup removes its launcher and owned runtime folders. Reports and settings in `%LOCALAPPDATA%\Wardr` are retained. Windows Setup logs are available in `%TEMP%`.
 
+## Verify a published release
+
+The release command runs the Windows live test on a clean Windows x64 GitHub
+Actions runner after Render verification. It verifies the signed catalog
+hashes and timestamped Authenticode signatures for both published Setup
+files. It checks a fresh installation of the target, then installs the
+baseline and updates it in place through the dashboard using the signed
+getwardr.com feed. The baseline comes from the signed prior feed recorded
+before publication. The target must be current on the live feed.
+
+After restart, the workflow checks the new version, fresh access token,
+retained launch port and monitoring interval, saved assessment, advisory
+catalog, event history, and exported report. The release command waits for
+this check and reuses its recorded run on resume. Use `--retry-failed` to
+retry a failed Windows run after publication.
+[Windows live release workflow](../../.github/workflows/windows-live-release.yml) · [Release guide](../../docs/DEVELOPMENT.md#publish-a-release)
+
 ## Authenticode release signing
 
 Use a Windows signing machine with Windows SDK `signtool.exe` and the official Microsoft Artifact Signing client. Complete organization identity validation, create a **Public Trust** certificate profile, and assign **Artifact Signing Certificate Profile Signer** for that profile to the signing identity. Record the full certificate subject from the approved profile independently of the file you are verifying. [Microsoft Artifact Signing setup](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart) · [Signing client setup](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)

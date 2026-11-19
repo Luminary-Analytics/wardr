@@ -1,4 +1,5 @@
 name: Wardr Windows live release smoke
+run-name: Wardr Windows live upgrade ${{ inputs.baseline }} to ${{ inputs.target }}
 
 on:
   workflow_dispatch:
@@ -33,4 +34,8 @@ jobs:
         env:
           WARDR_BASELINE: ${{ inputs.baseline }}
           WARDR_TARGET: ${{ inputs.target }}
-        run: ./tests/smoke_windows_release.ps1 -BaselineVersion $env:WARDR_BASELINE -TargetVersion $env:WARDR_TARGET
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF -cne "refs/tags/v$env:WARDR_TARGET") {
+            throw 'The workflow tag must match the target release version.'
+          }
+          ./tests/smoke_windows_release.ps1 -BaselineVersion $env:WARDR_BASELINE -TargetVersion $env:WARDR_TARGET

@@ -20,6 +20,7 @@ PUBLIC_REPO = "Luminary-Analytics/wardr"
 SIGNING_REPO = "Luminary-Analytics/resonant-client"
 CHECKS = {"checks.yml": "Wardr checks", "update-smoke.yml": "Wardr update smoke"}
 SIGNING_WORKFLOWS = ("wardr-windows-sign.yml", "wardr-macos-sign.yml", "wardr-linux-build.yml")
+WINDOWS_LIVE_WORKFLOW = "windows-live-release.yml"
 _VERSION = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -27,6 +28,8 @@ _INSTALLER_LIMIT = 150 * 1024 * 1024
 _PROOF_LIMIT = 64 * 1024
 _ARCHIVE_LIMIT = _INSTALLER_LIMIT + 1024 * 1024
 _POLL_INTERVAL = 10
+_WINDOWS_VISIBILITY_GRACE = 30
+_RETRIABLE_CONCLUSIONS = {"failure", "startup_failure", "timed_out"}
 
 
 class ReleaseError(ValueError):
@@ -92,20 +95,24 @@ def _id(value, description):
     return value
 
 
-def _matches_run(run, workflow, commit, tag, name=None):
+def _matches_run(run, workflow, commit, tag, name=None, *, event="push"):
     path = run.get("path")
     return (
         isinstance(path, str) and path.split("@", 1)[0] == f".github/workflows/{workflow}"
-        and run.get("event") == "push" and run.get("head_sha") == commit
+        and run.get("event") == event and run.get("head_sha") == commit
         and (tag is None or run.get("head_branch") == tag)
         and (name is None or run.get("name") == name)
     )
 
 
-def _wait_runs(repo, workflows, commit, tag, timeout, retry_failed):
+def _workflow_deadline(timeout):
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ReleaseError("Set a positive workflow timeout in seconds.")
-    deadline = monotonic() + timeout
+    return monotonic() + timeout
+
+
+def _wait_runs(repo, workflows, commit, tag, timeout, retry_failed):
+    deadline = _workflow_deadline(timeout)
     filters = {"head_sha": commit, "event": "push", "per_page": 100}
     if tag:
         filters["branch"] = tag
@@ -143,7 +150,7 @@ def _wait_runs(repo, workflows, commit, tag, timeout, retry_failed):
                 completed[workflow] = run_id
                 del pending[workflow]
                 continue
-            if retry_failed and conclusion in {"failure", "startup_failure", "timed_out"}:
+            if retry_failed and conclusion in _RETRIABLE_CONCLUSIONS:
                 attempt = _id(run.get("run_attempt"), "workflow attempt")
                 if run_id not in retried:
                     _gh("run", "rerun", str(run_id), "--failed", "--repo", f"github.com/{repo}",
@@ -176,6 +183,96 @@ def wait_signing(tag, request_commit, timeout, retry_failed=False):
     return _wait_runs(
         SIGNING_REPO, dict.fromkeys(SIGNING_WORKFLOWS), _commit(request_commit), tag, timeout, retry_failed,
     )
+
+
+def _windows_versions(baseline, version):
+    baseline, version = _version(baseline), _version(version)
+    if tuple(map(int, baseline.split("."))) >= tuple(map(int, version.split("."))):
+        raise ReleaseError("The Windows live smoke baseline must precede the target release.")
+    return baseline, version
+
+
+def dispatch_windows_live(baseline, version) -> int:
+    """Dispatch the public Windows smoke on the release tag and return its exact run ID."""
+    baseline, version = _windows_versions(baseline, version)
+    workflow = f"repos/{PUBLIC_REPO}/actions/workflows/{WINDOWS_LIVE_WORKFLOW}"
+    try:
+        response = _api(
+            f"{workflow}/dispatches",
+            "--method", "POST", "--header", "X-GitHub-Api-Version: 2026-03-10",
+            "--raw-field", f"ref=refs/tags/v{version}",
+            "--raw-field", f"inputs[baseline]={baseline}",
+            "--raw-field", f"inputs[target]={version}",
+        )
+        return _id(response.get("workflow_run_id") if isinstance(response, dict) else None, "workflow run")
+    except ReleaseError as exc:
+        raise ReleaseError(f"Could not confirm the Windows live smoke dispatch for v{version}. {exc}") from exc
+
+
+def wait_windows_live(run_id, version, commit, timeout, *, baseline, retry_failed=False) -> None:
+    """Verify and wait for one previously dispatched Windows smoke run."""
+    run_id = _id(run_id, "workflow run")
+    baseline, version = _windows_versions(baseline, version)
+    tag, commit = f"v{version}", _commit(commit)
+    title = f"Wardr Windows live upgrade {baseline} to {version}"
+    deadline = _workflow_deadline(timeout)
+    visibility_deadline = min(deadline, monotonic() + _WINDOWS_VISIBILITY_GRACE)
+    path = f"repos/{PUBLIC_REPO}/actions/runs/{run_id}"
+    link = f"https://github.com/{PUBLIC_REPO}/actions/runs/{run_id}"
+    seen = False
+    retried_attempt = 0
+    progress = None
+    while (left := deadline - monotonic()) > 0:
+        try:
+            run = _api(path, timeout=min(60, left))
+        except ReleaseError as exc:
+            visibility_left = visibility_deadline - monotonic()
+            if not seen and visibility_left > 0 and str(exc).endswith("(HTTP 404)"):
+                sleep(min(_POLL_INTERVAL, visibility_left))
+                continue
+            raise ReleaseError(f"Could not read the Windows live smoke run. {link} {exc}") from exc
+        seen = True
+        if (
+            not isinstance(run, dict) or type(run.get("id")) is not int or run["id"] != run_id
+            or not _matches_run(run, WINDOWS_LIVE_WORKFLOW, commit, tag, event="workflow_dispatch")
+            or run["path"].partition("@")[2] not in {"", tag, f"refs/tags/{tag}"}
+            or run.get("display_title") != title
+        ):
+            raise ReleaseError(
+                f"Run {run_id} does not match {title} on {tag} at {commit}. {link}"
+            )
+        attempt = _id(run.get("run_attempt"), "workflow attempt")
+        status, conclusion = run.get("status"), run.get("conclusion")
+        if not isinstance(status, str) or (conclusion is not None and not isinstance(conclusion, str)):
+            raise ReleaseError(f"GitHub returned an invalid Windows live smoke status. {link}")
+        if attempt > retried_attempt:
+            state = (attempt, status, conclusion)
+            if progress != state:
+                print(
+                    f"GitHub reports {conclusion or status} for Windows live smoke attempt {attempt}. {link}",
+                    file=sys.stderr, flush=True,
+                )
+                progress = state
+            if status == "completed":
+                if conclusion == "success":
+                    return
+                if not retry_failed or retried_attempt or conclusion not in _RETRIABLE_CONCLUSIONS:
+                    raise ReleaseError(
+                        f"Windows live smoke concluded with {conclusion or 'an unknown result'}. {link}"
+                    )
+                left = deadline - monotonic()
+                if left <= 0:
+                    break
+                try:
+                    _gh("run", "rerun", str(run_id), "--failed", "--repo", f"github.com/{PUBLIC_REPO}",
+                        timeout=min(60, left))
+                except ReleaseError as exc:
+                    raise ReleaseError(f"Could not retry the Windows live smoke run. {link} {exc}") from exc
+                retried_attempt = attempt
+        left = deadline - monotonic()
+        if left > 0:
+            sleep(min(_POLL_INTERVAL, left))
+    raise ReleaseError(f"Timed out waiting for the Windows live smoke on {tag}. {link}")
 
 
 def _fingerprint(path):

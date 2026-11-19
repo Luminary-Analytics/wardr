@@ -91,8 +91,9 @@ Blender is only needed to edit or re-render the supplied brand assets.
 
 Use a maintainer Mac with Python 3.11 or newer, uv, Git, GitHub CLI, OpenSSL 3
 on `PATH`, and Xcode command-line tools for `codesign` and `xcrun stapler`.
-Authenticate GitHub CLI as a maintainer who can push to all three repositories
-and create the protected signing tag. Review the new version in
+Authenticate GitHub CLI as a maintainer who can push to all three repositories,
+create the protected signing tag, and dispatch workflows in the public Wardr
+repository. Review the new version in
 `pyproject.toml` and push the reviewed commit to the public Wardr repository's
 `main` branch. From that commit, run the release with the company site checkout,
 the existing private signing checkout, and the local Wardr release key.
@@ -103,7 +104,7 @@ python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-r
 
 Add `--plan` for a read-only preview. Rerun the same command to resume, and
 add `--retry-failed` to retry failed cloud jobs. Keep the sealed artifacts and
-saved progress in `dist/release/X.Y.Z` until the release is live. If the site
+saved progress in `dist/release/X.Y.Z` until the release checks finish. If the site
 or update feed is still serving the previous release after the deploy check,
 check the Render deploy log and rerun the same command after resolving it.
 
@@ -120,6 +121,17 @@ check the Render deploy log and rerun the same command after resolving it.
    status, pushes the site for Render to deploy, then verifies the live
    site, feed, and downloads over HTTPS.
    [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
+4. After Render verification, it runs the Windows live release smoke test and
+   waits for a successful result. The baseline version comes from the signed
+   prior feed saved in the release checkpoint. For the release after 0.2.2,
+   the workflow uses the published 0.2.2 Windows Setup and upgrades it through
+   the dashboard against the production feed. It also tests the new Setup and
+   checks that the upgrade preserves settings and saved data.
+   [Windows live release workflow](../.github/workflows/windows-live-release.yml)
+
+If the Windows check fails, the command reports a verification error after
+the target is publicly live. Rerun the same command to resume the recorded
+Actions run. Add `--retry-failed` to rerun failed Windows verification.
 
 Keep the Wardr release key local and outside the repositories. Keep platform
 signing credentials in the protected private release environment. Installed

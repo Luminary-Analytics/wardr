@@ -1,8 +1,9 @@
 """Exercise release integrity gates without contacting GitHub."""
 
+from contextlib import redirect_stderr
 from hashlib import sha256
 from importlib.util import module_from_spec, spec_from_file_location
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -181,6 +182,139 @@ class DraftReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(github.ReleaseError, "differs from"):
             github.promote(VERSION, self.files)
         self.assertEqual(self.writes, [])
+
+
+class WindowsLiveSmokeTests(unittest.TestCase):
+    baseline = "0.3.3"
+    run_id = 321
+    workflow = "windows-live-release.yml"
+    endpoint = f"repos/Luminary-Analytics/wardr/actions/runs/{run_id}"
+    run_url = f"https://github.com/Luminary-Analytics/wardr/actions/runs/{run_id}"
+
+    def setUp(self):
+        self.enterContext(redirect_stderr(StringIO()))
+        self.api = self.enterContext(patch.object(github, "_api"))
+        self.cli = self.enterContext(patch.object(github, "_gh"))
+        self.sleep = self.enterContext(patch.object(github, "sleep"))
+
+    def run_response(self, **changes):
+        return {
+            "id": self.run_id,
+            "path": f".github/workflows/{self.workflow}@refs/tags/v{VERSION}",
+            "head_branch": f"v{VERSION}",
+            "head_sha": COMMIT,
+            "event": "workflow_dispatch",
+            "display_title": f"Wardr Windows live upgrade {self.baseline} to {VERSION}",
+            "status": "completed",
+            "conclusion": "success",
+            "run_attempt": 1,
+            **changes,
+        }
+
+    def wait_for_run(self, **options):
+        github.wait_windows_live(self.run_id, VERSION, COMMIT, 60, baseline=self.baseline, **options)
+
+    def test_dispatch_uses_exact_release_tag_and_version_pair(self):
+        self.api.return_value = {"workflow_run_id": self.run_id}
+        self.assertEqual(github.dispatch_windows_live(self.baseline, VERSION), self.run_id)
+        self.api.assert_called_once_with(
+            f"repos/Luminary-Analytics/wardr/actions/workflows/{self.workflow}/dispatches",
+            "--method", "POST", "--header", "X-GitHub-Api-Version: 2026-03-10",
+            "--raw-field", f"ref=refs/tags/v{VERSION}",
+            "--raw-field", f"inputs[baseline]={self.baseline}",
+            "--raw-field", f"inputs[target]={VERSION}",
+        )
+
+    def test_dispatch_rejects_unsafe_inputs_without_contacting_github(self):
+        for baseline, version in ((VERSION, VERSION), ("0.3.5", VERSION), (self.baseline, "main")):
+            with self.subTest(baseline=baseline, version=version), self.assertRaises(github.ReleaseError):
+                github.dispatch_windows_live(baseline, version)
+        self.api.assert_not_called()
+
+    def test_dispatch_requires_a_valid_run_id(self):
+        for response in (None, {}, {"workflow_run_id": True}, {"workflow_run_id": "321"}, {"workflow_run_id": 0}):
+            with self.subTest(response=response), self.assertRaisesRegex(github.ReleaseError, "valid workflow run ID"):
+                self.api.return_value = response
+                github.dispatch_windows_live(self.baseline, VERSION)
+
+    def test_wait_polls_pending_run_until_the_pinned_run_succeeds(self):
+        self.api.side_effect = (
+            self.run_response(status="queued", conclusion=None),
+            self.run_response(status="in_progress", conclusion=None),
+            self.run_response(path=f".github/workflows/{self.workflow}"),
+        )
+        self.wait_for_run()
+        self.assertEqual([call.args for call in self.api.call_args_list], [(self.endpoint,)] * 3)
+        self.assertEqual(self.sleep.call_count, 2)
+        self.cli.assert_not_called()
+
+    def test_wait_rejects_success_from_wrong_run_provenance(self):
+        changes = (
+            {"id": self.run_id + 1},
+            {"head_branch": f"v{self.baseline}"},
+            {"head_sha": "b" * 40},
+            {"event": "push"},
+            {"display_title": f"Wardr Windows live upgrade 0.3.2 to {VERSION}"},
+            {"path": ".github/workflows/update-smoke.yml"},
+            {"path": f".github/workflows/{self.workflow}@refs/heads/main"},
+        )
+        for wrong in changes:
+            with self.subTest(wrong=wrong), self.assertRaisesRegex(github.ReleaseError, "does not match"):
+                self.api.return_value = self.run_response(**wrong)
+                self.wait_for_run(retry_failed=True)
+        self.assertEqual(self.api.call_count, len(changes))
+        self.sleep.assert_not_called()
+        self.cli.assert_not_called()
+
+    def test_wait_reports_completed_failure_without_retry(self):
+        self.api.return_value = self.run_response(conclusion="failure")
+        with self.assertRaisesRegex(github.ReleaseError, "concluded with failure") as error:
+            self.wait_for_run()
+        self.assertIn(self.run_url, str(error.exception))
+        self.api.assert_called_once()
+        self.cli.assert_not_called()
+
+    def test_wait_tolerates_initial_run_visibility_delay(self):
+        self.api.side_effect = (github.ReleaseError("gh: Not Found (HTTP 404)"), self.run_response())
+        self.wait_for_run()
+        self.assertEqual([call.args for call in self.api.call_args_list], [(self.endpoint,)] * 2)
+        self.sleep.assert_called_once()
+
+    def test_wait_fails_if_a_previously_visible_run_disappears(self):
+        self.api.side_effect = (
+            self.run_response(status="queued", conclusion=None),
+            github.ReleaseError("gh: Not Found (HTTP 404)"),
+        )
+        with self.assertRaisesRegex(github.ReleaseError, "Could not read the Windows live smoke run"):
+            self.wait_for_run()
+        self.assertEqual(self.api.call_count, 2)
+        self.sleep.assert_called_once()
+
+    def test_retry_ignores_stale_completed_results_until_a_new_attempt(self):
+        self.api.side_effect = (
+            self.run_response(run_attempt=3, conclusion="failure"),
+            self.run_response(run_attempt=3),
+            self.run_response(run_attempt=2, conclusion="failure"),
+            self.run_response(run_attempt=4, status="in_progress", conclusion=None),
+            self.run_response(run_attempt=4),
+        )
+        self.wait_for_run(retry_failed=True)
+        self.assertEqual([call.args for call in self.api.call_args_list], [(self.endpoint,)] * 5)
+        self.assertEqual(
+            self.cli.call_args.args,
+            ("run", "rerun", str(self.run_id), "--failed", "--repo", "github.com/Luminary-Analytics/wardr"),
+        )
+        self.assertEqual(self.cli.call_count, 1)
+
+    def test_retry_reports_failure_on_the_new_attempt(self):
+        self.api.side_effect = (
+            self.run_response(run_attempt=3, conclusion="failure"),
+            self.run_response(run_attempt=4, conclusion="timed_out"),
+        )
+        with self.assertRaisesRegex(github.ReleaseError, "timed_out"):
+            self.wait_for_run(retry_failed=True)
+        self.assertEqual(self.api.call_count, 2)
+        self.cli.assert_called_once()
 
 
 if __name__ == "__main__":
