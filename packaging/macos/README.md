@@ -15,8 +15,10 @@ WARDR_MACOS_NOTARY_PROFILE=wardr-notary \
 ```
 
 Use a fresh output directory for the release. The builder signs and verifies
-the standalone Python’s Mach-O files, then the app bundle, then the disk
-image. Developer ID signing uses secure timestamps. The interpreter has the
+Mach-O files in the standalone Python runtime and dependency wheels before
+signing the app bundle and disk image. It updates the dependency wheels’
+RECORD hashes and preserves the published Wardr wheel byte-for-byte.
+Developer ID signing uses secure timestamps. The interpreter has the
 Disable Library Validation entitlement to load PyCA and CFFI modules from
 the installed virtual environment. The app launcher uses Hardened Runtime
 with its default library validation. [Apple code signing](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac) ·

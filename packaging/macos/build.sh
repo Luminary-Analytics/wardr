@@ -62,7 +62,7 @@ for size in 16 32 128 256 512; do
 done
 /usr/bin/iconutil -c icns "$marks" -o "$app/Contents/Resources/Wardr.icns"
 /usr/bin/plutil -insert CFBundleIconFile -string Wardr "$plist"
-/usr/bin/python3 -I "$here/sign_payload.py" "$app/Contents/Resources/payload/python" \
+/usr/bin/python3 -I "$here/sign_payload.py" "$app/Contents/Resources/payload" \
     "$identity" "$here/Python.entitlements"
 /usr/bin/codesign --force --sign "$identity" "$timestamp" --options runtime "$app"
 /usr/bin/codesign --verify --deep --strict "$app"
