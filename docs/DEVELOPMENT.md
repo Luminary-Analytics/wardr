@@ -102,11 +102,8 @@ the existing private signing checkout, and the local Wardr release key.
 python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
 ```
 
-Add `--plan` for a read-only preview. Rerun the same command to resume, and
-add `--retry-failed` to retry failed cloud jobs. Keep the sealed artifacts and
-saved progress in `dist/release/X.Y.Z` until the release checks finish. If the site
-or update feed is still serving the previous release after the deploy check,
-check the Render deploy log and rerun the same command after resolving it.
+Add `--plan` for a read-only preview. Keep the sealed artifacts and saved
+progress in `dist/release/X.Y.Z` until the release checks finish.
 
 1. The runner seals the exact wheel and source archive from the reviewed
    commit. It tests an in-place upgrade from the currently published signed
@@ -130,13 +127,82 @@ check the Render deploy log and rerun the same command after resolving it.
    live dashboard, and checks that settings and saved data survive the restart.
    [Native live release workflow](../.github/workflows/live-release.yml)
 
-The release command waits for all five checks. A failure is reported after the
-target is publicly live. Rerun the same command to resume the recorded Actions
-run. Add `--retry-failed` to rerun failed jobs while the target is still the live
-version.
-
 Keep the Wardr release key local and outside the repositories. Keep platform
 signing credentials in the protected private release environment. Installed
 Wardr clients verify the signed feed on getwardr.com using PyCA cryptography.
 Wardr 0.2.0 users can install the current wheel manually to get in-app
 updates. [Security policy](../SECURITY.md)
+
+### Wait for GitHub run metadata
+
+When Wardr 0.2.4 went live, GitHub first returned the generic title `Wardr live
+release smoke` for the dispatched run. About five seconds later it returned
+`Wardr live upgrade 0.2.3 to 0.2.4`. The original release command waited for
+the metadata, tracked the same run, and finished successfully in one invocation.
+[Wardr 0.2.4 live release run](https://github.com/Luminary-Analytics/wardr/actions/runs/44629265573)
+
+Initial polling gives GitHub up to 30 seconds to expose the recorded run ID or
+fill in metadata for that pending run. Before using a result, the runner verifies
+the run ID, workflow, dispatch event, release tag, commit, and version pair. Let
+the release command continue while it waits for metadata or for queued or
+running jobs.
+
+### Verify all five live checks
+
+Open the Actions run URL printed by the release command. If the terminal is
+closed, find the run ID in `live_release_run` in `dist/release/X.Y.Z/state.json`.
+For 0.2.4, this command shows the release identity and all job conclusions.
+
+```sh
+gh run view 44629265573 --repo Luminary-Analytics/wardr \
+  --json displayTitle,event,headBranch,headSha,status,conclusion,jobs \
+  --jq '{displayTitle, event, headBranch, headSha, status, conclusion, jobs: [.jobs[] | {name, conclusion}]}'
+```
+
+- Match `displayTitle` to the previous and target versions, `headBranch` to the
+  target tag such as `v0.2.4`, and `headSha` to `commit` in the release
+  checkpoint. The event is `workflow_dispatch`.
+- Confirm the run is `completed` with conclusion `success` and that all five
+  jobs show `success` individually. Expect `Windows x64 / verify`, `macos x64`
+  (Intel), `macos arm64` (Apple Silicon), `linux x64`, and `linux arm64`.
+- In each job log, confirm the installer verification and the `Verified live
+  Wardr 0.2.3 to 0.2.4 through https://getwardr.com with preserved local state`
+  message for the expected version pair. The restart check covers the listening
+  port, monitoring interval, saved assessment, advisory cache, report, and
+  event history. A successful release command ends with `All five native live
+  upgrade checks passed.`
+
+After a partial retry, check the latest attempt for each job name across the
+whole run. This command includes jobs that passed on earlier attempts. Replace
+the run ID with the one from the release checkpoint.
+
+```sh
+gh api --paginate \
+  'repos/Luminary-Analytics/wardr/actions/runs/44629265573/jobs?filter=all&per_page=100' \
+  --jq '.jobs[] | [.name, .run_attempt, .status, .conclusion] | @tsv'
+```
+
+### Resume or retry a release
+
+A manual resume is needed when the release command exits before it reports
+success or is interrupted. While it is still running, let it handle Render
+propagation, GitHub metadata delays, and active jobs. Use the same release version
+and checkout paths, and preserve the checkpoint and sealed artifacts.
+
+| What happened | How to continue |
+| --- | --- |
+| The command exited or was interrupted while an Actions run was queued, running, or already successful | Rerun the same release command. Once it revalidates the live site, it follows the saved `live_release_run`. |
+| Render was still serving older files when live verification stopped | Check the Render deploy log, resolve any deploy problem, and rerun the same command once the target deployment is healthy. |
+| A signing or live-check workflow failed | Inspect its job logs and resolve the cause. Rerun the release command with `--retry-failed` to retry eligible failed jobs on that same Actions run. |
+| GitHub run metadata still did not match after the initial wait | Check that the run ID, tag, commit, and version pair match the intended release. Rerun the command once GitHub shows the expected metadata for that run. |
+
+`--retry-failed` retries jobs from a recorded workflow that concluded with
+`failure`, `startup_failure`, or `timed_out`, at most once per workflow run per
+invocation. If dispatch was interrupted before `live_release_run` was saved,
+check Actions for the target tag and version pair first. A release command
+resumed without a recorded live run ID dispatches a new run.
+
+The command reports live-check failures after publication. Retry the live
+checks while the target is still the current signed version on getwardr.com.
+If a newer version has gone live, use that release's own run to verify the live
+feed.

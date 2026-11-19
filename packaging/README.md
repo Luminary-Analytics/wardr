@@ -41,9 +41,8 @@ tests to pass, then run this from the Wardr software checkout.
 python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
 ```
 
-Use `--plan` for a read-only preview. Run the same command again to resume a
-release and use `--retry-failed` to retry failed cloud jobs. The runner keeps
-release artifacts and progress in `dist/release/X.Y.Z`.
+Use `--plan` for a read-only preview. The runner keeps release artifacts and
+progress in `dist/release/X.Y.Z`.
 
 The runner seals the wheel and source archive and verifies the in-place
 upgrade from the current signed wheel to the candidate, including the state
@@ -62,9 +61,10 @@ on Windows x64, macOS ARM64 and Intel, and Linux ARM64 and x64. The baseline
 comes from the signed prior feed in the release checkpoint. Each upgrade
 checks that settings and saved data survive the dashboard restart.
 
-The runner waits for all five jobs and reports any failure after publication.
-Rerun the release command to use the recorded Actions run, or add
-`--retry-failed` to rerun failed jobs. [Development and release guide](../docs/DEVELOPMENT.md#publish-a-release)
+The runner waits for GitHub run metadata to settle and then waits for all five
+jobs. Use the recorded Actions run to confirm the upgrade on each platform.
+The release guide explains when to wait, resume, or retry.
+[Verify all five live checks](../docs/DEVELOPMENT.md#verify-all-five-live-checks) · [Resume or retry a release](../docs/DEVELOPMENT.md#resume-or-retry-a-release)
 
 ## Build preview installers
 
