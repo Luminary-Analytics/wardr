@@ -150,10 +150,15 @@ class DraftReleaseTests(unittest.TestCase):
         self.assertEqual(self.writes, [("upload", "release.json.sig"), ("promote", 37)])
 
     def test_a_new_draft_keeps_the_community_prerelease_status(self):
-        results = (None, self.release, self.release)
-        with patch.object(github, "_find_release", side_effect=results), patch.object(github, "_gh") as cli:
+        results = (None, None, self.release, self.release)
+        with (
+            patch.object(github, "_find_release", side_effect=results),
+            patch.object(github, "_gh") as cli,
+            patch.object(github, "sleep") as wait,
+        ):
             self.assertTrue(github.stage_draft(VERSION, self.files))
         cli.assert_called_once()
+        wait.assert_called_once_with(2)
         self.assertIn("--prerelease", cli.call_args.args)
         self.assertIn("--verify-tag", cli.call_args.args)
 

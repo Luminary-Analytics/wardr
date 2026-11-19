@@ -313,6 +313,16 @@ def _same_release(tag, release_id):
     return release
 
 
+def _wait_for_draft(tag):
+    for attempt in range(7):
+        if attempt:
+            sleep(2)
+        release = _find_release(tag)
+        if release is not None:
+            return release
+    return None
+
+
 def _missing_assets(release_id, expected):
     missing = set(expected)
     for asset in _pages(f"repos/{PUBLIC_REPO}/releases/{release_id}/assets?per_page=100"):
@@ -353,11 +363,11 @@ def stage_draft(version, assets):
             _gh("release", "create", tag, "--repo", f"github.com/{PUBLIC_REPO}", "--draft", "--prerelease", "--verify-tag",
                 "--title", f"Wardr Community {version}", "--notes", "Download Wardr for your platform below.")
         except ReleaseError:
-            release = _find_release(tag)
+            release = _wait_for_draft(tag)
             if release is None:
                 raise
         else:
-            release = _find_release(tag)
+            release = _wait_for_draft(tag)
             if release is None:
                 raise ReleaseError(f"Could not confirm the new draft GitHub release for {tag}.")
 

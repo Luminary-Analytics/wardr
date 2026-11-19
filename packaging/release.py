@@ -335,12 +335,14 @@ def publish(site, work, source, packages, installers, windows_sha, state, args):
                 source / PUBLIC_KEY, "--output", catalog, *arguments, cwd=checkout, timeout=300)
             run(*base, "--installer-manifest-dir", catalog, cwd=checkout)
         run(sys.executable, "-m", "scripts.check_site", "--output", public, cwd=checkout)
-        if draft:
-            promote(version, assets)
         git(checkout, "add", "--", "public")
-        if git_text(checkout, "diff", "--cached", "--name-only"):
+        site_changed = bool(git_text(checkout, "diff", "--cached", "--name-only"))
+        if site_changed:
             git(checkout, "diff", "--cached", "--check")
             git(checkout, "commit", "-m", f"Publish Wardr {version} downloads and application updates")
+        if draft:
+            promote(version, assets)
+        if site_changed:
             git(checkout, "push", "origin", "HEAD:refs/heads/main")
         run(sys.executable, "-m", "scripts.verify_live", "--output", public, "--version", version,
             "--attempts", "60", "--deadline", "900", cwd=checkout, timeout=960)
