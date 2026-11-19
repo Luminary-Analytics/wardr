@@ -36,6 +36,9 @@ To upgrade from v0.2.0, close Wardr, download the v0.2.1 wheel, and run
 `pipx install --force ./wardr-0.2.1-py3-none-any.whl` once. Launch Wardr again
 as the account whose security settings you want to check.
 
+Wardr also builds native installer previews for Windows, macOS, and Linux.
+They include the runtime and can install offline. [Native installer guide](packaging/README.md)
+
 ## Dashboard
 
 Wardr prints a private loopback launch link. It scans on startup and hourly

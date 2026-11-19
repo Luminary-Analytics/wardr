@@ -1,0 +1,107 @@
+name: Wardr native installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Wardr Community version to package
+        default: '0.2.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, platform: windows, arch: x64}
+          - {os: macos-latest, platform: macos, arch: arm64}
+          - {os: macos-15-intel, platform: macos, arch: x64}
+          - {os: ubuntu-latest, platform: linux, arch: x64}
+          - {os: ubuntu-24.04-arm, platform: linux, arch: arm64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      WARDR_VERSION: ${{ inputs.version }}
+      WARDR_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Stage the signed release and offline runtime
+        shell: bash
+        run: |
+          python -m pip install cryptography==50.0.2
+          python packaging/build_payload.py --version "$WARDR_VERSION" --output native-payload
+      - name: Build and install Windows setup
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tool = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $inno = Join-Path $env:RUNNER_TEMP 'inno-compiler'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $tool
+          if ((Get-FileHash $tool -Algorithm SHA256).Hash -ine '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup installer checksum mismatch.'
+          }
+          $installed = Start-Process -FilePath $tool -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$inno`"" -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "Inno Setup installation exited $($installed.ExitCode)." }
+          $payload = (Resolve-Path native-payload).Path
+          $output = (New-Item -ItemType Directory -Path native-dist).FullName
+          & (Join-Path $inno 'ISCC.exe') "/DWardrVersion=$env:WARDR_VERSION" "/DWardrPayload=$payload" "/DWardrArch=$env:WARDR_ARCH" "/O$output" packaging/windows/wardr.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler exited $LASTEXITCODE." }
+          $setup = (Get-ChildItem native-dist -Filter '*.exe').FullName
+          $location = Join-Path $env:RUNNER_TEMP 'Wardr Runtime Test'
+          $log = Join-Path $env:RUNNER_TEMP 'wardr-setup.log'
+          $result = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$location`" /LOG=`"$log`"" -Wait -PassThru
+          if ($result.ExitCode -ne 0) {
+            Get-Content $log -Tail 75
+            throw "Wardr setup exited $($result.ExitCode)."
+          }
+          $python = Join-Path $location 'venv\Scripts\python.exe'
+          & $python -I -m wardr --state-dir (Join-Path $env:RUNNER_TEMP 'verify-updates') update --check
+          if ($LASTEXITCODE -ne 0) { throw "Wardr update check exited $LASTEXITCODE." }
+          "WARDR_INSTALLED_PYTHON=$python" >> $env:GITHUB_ENV
+      - name: Build and install macOS disk image
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          sh packaging/macos/build.sh native-payload "$WARDR_VERSION" native-dist
+          image="native-dist/wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+          mount="$RUNNER_TEMP/wardr-volume"
+          location="$RUNNER_TEMP/Wardr Runtime Test"
+          mkdir -p "$mount"
+          hdiutil verify "$image"
+          hdiutil attach "$image" -quiet -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach "$mount" -quiet' EXIT
+          codesign --verify "$mount/Wardr.app"
+          "$mount/Wardr.app/Contents/MacOS/Wardr" --prepare-only "$location"
+          "$location/venv/bin/python3" -I -m wardr --state-dir "$RUNNER_TEMP/verify-updates" update --check
+          echo "WARDR_INSTALLED_PYTHON=$location/venv/bin/python3" >> "$GITHUB_ENV"
+      - name: Build and install Linux setup
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          python packaging/linux/build.py --payload native-payload --arch "$WARDR_ARCH" --output native-dist
+          export XDG_DATA_HOME="$RUNNER_TEMP/wardr-data"
+          sh "native-dist/wardr-$WARDR_VERSION-linux-$WARDR_ARCH.run" --no-desktop
+          python_path="$XDG_DATA_HOME/wardr/venv/bin/python"
+          "$python_path" -I -m wardr --state-dir "$RUNNER_TEMP/verify-updates" update --check
+          echo "WARDR_INSTALLED_PYTHON=$python_path" >> "$GITHUB_ENV"
+      - name: Verify in-app upgrade of the native installation
+        shell: bash
+        run: python tests/smoke_update.py --installed-python "$WARDR_INSTALLED_PYTHON" native-payload/wheelhouse/wardr-*.whl
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wardr-${{ inputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: native-dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

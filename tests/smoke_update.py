@@ -1,6 +1,8 @@
 """Run a real Wardr dashboard upgrade inside a disposable environment."""
 
+import argparse
 import base64
+from contextlib import closing, contextmanager
 import csv
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -12,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -31,6 +34,7 @@ LATEST = "/releases/latest.json"
 SENTINEL = "wardr-upgrade-smoke"
 MARKER = b"<!-- Wardr update smoke fixture -->"
 LAUNCH = re.compile(r"^Wardr is running at http://127\.0\.0\.1:(\d+)/#access=([A-Za-z0-9_-]{43})$", re.M)
+MONITOR_INTERVAL = 47
 
 # The installed CLI and its relaunched process keep their normal entry point.
 # Reroute only the release host and load a disposable trust key for this test.
@@ -132,13 +136,15 @@ def launch_port():
         return probe.getsockname()[1]
 
 
-def launch_link(log, count):
+def launch_link(log, count, process):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         matches = LAUNCH.findall(log.read_text(encoding="utf-8", errors="replace"))
         if len(matches) >= count:
             port, token = matches[count - 1]
             return int(port), token
+        if count == 1 and process.poll() is not None:
+            raise RuntimeError(f"Dashboard exited with code {process.returncode} before its initial launch")
         time.sleep(0.1)
     raise RuntimeError(f"Dashboard did not announce launch {count}")
 
@@ -179,12 +185,21 @@ def seed_state(directory):
             "refreshed_at": timestamp, "released_at": timestamp, "catalog_version": SENTINEL,
             "count": 0, "exploited_ids": [], "advisories": [],
         },
+        "exported-report.json": {"host": SENTINEL, "checks": [], "summary": {"passed": 0}},
     }
     for name, payload in payloads.items():
         path = directory / name
         path.write_text(json.dumps(payload), encoding="utf-8")
         path.chmod(0o600)
-    return {directory / name: (directory / name).read_bytes() for name in payloads}
+    event = {
+        "id": SENTINEL, "at": datetime.now(timezone.utc).isoformat(), "severity": "low",
+        "title": "Existing test event", "detail": "Seeded before update.", "source": "Smoke test",
+    }
+    history = directory / "monitor-events.sqlite3"
+    with closing(sqlite3.connect(history)) as database, database:
+        database.execute("CREATE TABLE events (id TEXT PRIMARY KEY, at TEXT NOT NULL, payload TEXT NOT NULL)")
+        database.execute("INSERT INTO events VALUES (?, ?, ?)", (event["id"], event["at"], json.dumps(event)))
+    return {directory / name: (directory / name).read_bytes() for name in payloads}, history, event
 
 
 def install_baseline(root, baseline):
@@ -195,11 +210,39 @@ def install_baseline(root, baseline):
         [str(python), "-I", "-m", "pip", "--disable-pip-version-check", "install", str(baseline)],
         check=True, timeout=120,
     )
-    site_packages = subprocess.check_output(
-        [str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"], text=True,
-    ).strip()
-    (Path(site_packages) / "sitecustomize.py").write_text(TRANSPORT, encoding="utf-8")
     return python
+
+
+@contextmanager
+def fixture_transport(python):
+    if not python.is_absolute() or not python.is_file():
+        raise ValueError("Provide the absolute Python path of a disposable Wardr virtual environment")
+    prefix, base_prefix, purelib = json.loads(subprocess.check_output(
+        [str(python), "-I", "-c", "import json, sys, sysconfig; print(json.dumps("
+         "[sys.prefix, sys.base_prefix, sysconfig.get_path('purelib')]))"],
+        text=True, timeout=15,
+    ))
+    if prefix == base_prefix or not Path(purelib).resolve().is_relative_to(Path(prefix).resolve()):
+        raise ValueError("The smoke test requires Python inside an isolated virtual environment")
+    shim = Path(purelib) / "sitecustomize.py"
+    if shim.is_symlink() or (shim.exists() and shim.stat().st_size):
+        raise ValueError("The test environment already has a nonempty sitecustomize.py")
+    cache = shim.parent / "__pycache__"
+    existing_cache = {path: path.read_bytes() for path in cache.glob("sitecustomize.*.pyc")}
+    existed = shim.exists()
+    try:
+        shim.write_text(TRANSPORT, encoding="utf-8")
+        yield
+    finally:
+        if existed:
+            shim.write_bytes(b"")
+        else:
+            shim.unlink(missing_ok=True)
+        for path in cache.glob("sitecustomize.*.pyc"):
+            if path not in existing_cache:
+                path.unlink()
+        for path, contents in existing_cache.items():
+            path.write_bytes(contents)
 
 
 def stop_dashboard(process, root):
@@ -220,17 +263,20 @@ def stop_dashboard(process, root):
 
 def upgrade(root, python, feed_port, cert, current, target):
     state = root / "device-state"
-    saved = seed_state(state)
+    saved, history, event = seed_state(state)
     port = launch_port()
-    log = root / "dashboard.log"
-    command = [str(python), "-I", "-m", "wardr", "--state-dir", str(state), "serve", "--port", str(port), "--no-browser"]
+    log, errors = root / "dashboard.log", root / "dashboard-errors.log"
+    command = [
+        str(python), "-I", "-m", "wardr", "--state-dir", str(state), "serve", "--port", str(port),
+        "--interval", str(MONITOR_INTERVAL), "--no-browser",
+    ]
     environment = {
         **os.environ, "SSL_CERT_FILE": str(cert), "WARDR_SMOKE_FEED": str(feed_port), "WARDR_SMOKE_ROOT": str(root),
     }
-    with log.open("wb") as output:
-        process = subprocess.Popen(command, cwd=root, env=environment, stdout=output, stderr=subprocess.DEVNULL)
+    with log.open("wb") as output, errors.open("wb") as error_output:
+        process = subprocess.Popen(command, cwd=root.parent, env=environment, stdout=output, stderr=error_output)
         try:
-            old_port, token = launch_link(log, 1)
+            old_port, token = launch_link(log, 1, process)
             assert old_port == port, "Dashboard ignored the selected port"
             status = await_update_state(port, token, "idle")
             assert status["current_version"] == current and status["can_check"], "Baseline cannot update"
@@ -243,7 +289,7 @@ def upgrade(root, python, feed_port, cert, current, target):
             assert MARKER not in request(port, token, "/")[1], "Dashboard switched assets before restart"
             assert request(port, token, "/api/update/restart", {})[0] == 202, "Restart was refused"
 
-            new_port, new_token = launch_link(log, 2)
+            new_port, new_token = launch_link(log, 2, process)
             assert new_port == port, "Restart lost the selected port"
             assert new_token != token, "Restart reused the original token"
             assert request(port, token, "/api/update")[0] == 403, "The old token still grants access"
@@ -253,15 +299,45 @@ def upgrade(root, python, feed_port, cert, current, target):
             assert defense["software"]["result"]["inventory"]["name"] == SENTINEL, "Saved software assessment was not loaded"
             _, status = request(port, new_token, "/api/status")
             assert status["intel"]["catalog_version"] == SENTINEL, "Saved advisory catalog was not loaded"
+            assert status["monitoring"]["interval"] == MONITOR_INTERVAL, "Restart lost the selected monitoring interval"
+            assert event in status["monitoring"]["events"], "Persisted event was not loaded"
             assert all(path.read_bytes() == data for path, data in saved.items()), "Update changed saved state"
+            with closing(sqlite3.connect(history, timeout=5)) as database:
+                row = database.execute("SELECT payload FROM events WHERE id = ?", (event["id"],)).fetchone()
+            assert row and json.loads(row[0]) == event, "Persisted event changed or was removed"
+        except Exception:
+            diagnostics = errors.read_text(encoding="utf-8", errors="replace")
+            diagnostics = re.sub(r"#access=[^\s]+", "#access=<redacted>", diagnostics)
+            for _, secret in LAUNCH.findall(log.read_text(encoding="utf-8", errors="replace")):
+                diagnostics = diagnostics.replace(secret, "<redacted>")
+            if diagnostics.strip():
+                print("Dashboard stderr:\n" + diagnostics.strip()[-4000:], file=sys.stderr)
+            raise
         finally:
             stop_dashboard(process, root)
 
 
-def smoke(baseline):
-    with tempfile.TemporaryDirectory(prefix="wardr-update-smoke-") as directory:
-        root = Path(directory)
-        python = install_baseline(root, baseline)
+@contextmanager
+def disposable_directory():
+    directory = tempfile.TemporaryDirectory(prefix="wardr-update-smoke-")
+    try:
+        yield Path(directory.name).resolve()
+    finally:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except OSError as error:
+                # Windows may briefly retain handles after the relaunched process stops.
+                if getattr(error, "winerror", None) not in (5, 32) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.25)
+
+
+def smoke(baseline, installed_python=None):
+    with disposable_directory() as root:
+        python = installed_python or install_baseline(root, baseline)
         current, target, feed = build_signed_feed(root, baseline)
         fetched, server_names = [], []
 
@@ -285,7 +361,8 @@ def smoke(baseline):
             worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True)
             worker.start()
             try:
-                upgrade(root, python, server.server_port, cert, current, target)
+                with fixture_transport(python):
+                    upgrade(root, python, server.server_port, cert, current, target)
             finally:
                 server.shutdown()
                 worker.join()
@@ -296,11 +373,15 @@ def smoke(baseline):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        raise SystemExit("Usage: python tests/smoke_update.py WHEEL [WHEEL ...]")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("wheels", metavar="WHEEL", nargs="+", type=Path)
+    parser.add_argument("--installed-python", type=Path, help="Python in a disposable environment already provisioned from WHEEL")
+    arguments = parser.parse_args()
+    if arguments.installed_python and len(arguments.wheels) != 1:
+        parser.error("--installed-python requires exactly one baseline wheel")
     # Exception context and captured dashboard output can include launch tokens.
     try:
-        for argument in sys.argv[1:]:
-            smoke(Path(argument).resolve())
+        for wheel in arguments.wheels:
+            smoke(wheel.resolve(), arguments.installed_python)
     except Exception as error:
         raise SystemExit(f"{type(error).__name__}: {error}") from None
