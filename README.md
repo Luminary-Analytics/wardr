@@ -1,9 +1,25 @@
 # Wardr Community
 
-Wardr is a local security defense tool for desktops and servers. It checks host
-security settings, inventories local network bindings, correlates security
-events, and creates an evidence-backed remediation plan. Community is free
-under the [MIT License](LICENSE).
+Wardr helps you harden a desktop or server you manage. The goal is to show
+what a machine exposes, explain the evidence behind each finding, and make it
+clear how to fix and verify security gaps. Community is free under the
+[MIT License](LICENSE).
+
+The installed application checks host settings, inventories local network
+bindings, correlates selected security events, and matches supplied software
+inventories to published advisories. It combines those findings into a
+remediation plan. [Wardr homepage and demo](https://wardr.onrender.com/)
+
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md) covers software components, evidence
+  and repair flows, data storage, trust boundaries, and coverage.
+- [Development and operations](docs/DEVELOPMENT.md) covers running from
+  source, troubleshooting, native checks, builds, and the release workflow.
+- [Security policy](SECURITY.md) covers vulnerability reporting and release
+  verification.
+- [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
+  contains the public site and its download publishing workflow.
 
 ## Install
 
