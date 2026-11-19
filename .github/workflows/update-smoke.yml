@@ -1,0 +1,40 @@
+name: Wardr update smoke
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Build the current release wheel
+        run: |
+          python -m pip install build "cryptography>=50.0.2"
+          python -m build --wheel
+      - name: Fetch the published Wardr 0.2.1 wheel
+        shell: bash
+        run: |
+          mkdir baseline
+          curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+            --output baseline/wardr-0.2.1-py3-none-any.whl \
+            https://github.com/Luminary-Analytics/wardr/releases/download/v0.2.1/wardr-0.2.1-py3-none-any.whl
+          python -c 'import hashlib; from pathlib import Path; wheel = Path("baseline/wardr-0.2.1-py3-none-any.whl"); assert hashlib.sha256(wheel.read_bytes()).hexdigest() == "c22945558625ab567a7c2c96e24051ab533275d4fd1fb4f22ebd354b0db35775", "The published baseline wheel checksum changed"'
+      - name: Install, update, and restart both release wheels locally
+        shell: bash
+        run: python tests/smoke_update.py baseline/*.whl dist/*.whl
