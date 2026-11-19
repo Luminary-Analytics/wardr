@@ -23,19 +23,18 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
 
 ## Install
 
-Install Python 3.11 or later and [pipx](https://pipx.pypa.io/stable/). Download
-the wheel from [Wardr releases](https://github.com/Luminary-Analytics/wardr/releases)
-and run the following commands from your downloads folder.
+Install Python 3.11 or later and pipx. Download the wheel and run these
+commands from your downloads folder. [Set up pipx](https://pipx.pypa.io/stable/) ·
+[Download Wardr](https://getwardr.com/#release)
 
 ```console
-pipx install ./wardr-0.2.0-py3-none-any.whl
+pipx install ./wardr-0.2.1-py3-none-any.whl
 wardr
 ```
 
-To upgrade from a downloaded wheel, run `pipx install --force ./wardr-0.2.0-py3-none-any.whl`
-with the new filename. To install from a source checkout, use `pipx install .`.
-Wardr has no third-party Python runtime dependencies. Run it as the account
-whose security settings you want to check.
+To upgrade from v0.2.0, close Wardr, download the v0.2.1 wheel, and run
+`pipx install --force ./wardr-0.2.1-py3-none-any.whl` once. Launch Wardr again
+as the account whose security settings you want to check.
 
 ## Dashboard
 
@@ -60,9 +59,32 @@ while the dashboard service runs. Select **Run scan** for an immediate refresh.
 - **Reports** and **Defense** export HTML and JSON. Exports can contain the
   machine name, software versions, bindings, and event details.
 
+## Update Wardr
+
+Starting with v0.2.1, open **Updates** in the dashboard and choose **Check for
+updates**. When a signed release is available, select **Update Wardr** to verify
+and install it, then choose **Restart Wardr**. Use the new dashboard window or
+the launch link printed in your terminal.
+
+In-place updates require Wardr installed in a pipx or Python virtual
+environment, with pip available in that environment or uv on `PATH`.
+Download the wheel and use your package manager for releases that change
+dependencies or when in-place updates are unavailable.
+
+```console
+wardr update --check
+wardr update
+```
+
+The CLI checks explicitly and installs only when you run `wardr update`.
+Restart any open Wardr process after a CLI update. On Windows, invoke the
+environment's Python with `-m wardr update` to keep the Wardr launcher free
+for replacement. [Update troubleshooting](docs/DEVELOPMENT.md#operate-and-troubleshoot)
+
 ## Offline mode
 
-Start a session with public advisory downloads disabled.
+Start a dashboard session with public advisory downloads and Wardr release
+checks disabled.
 
 ```console
 wardr serve --offline
@@ -101,6 +123,10 @@ wardr serve --no-browser --offline
 stderr. Use an existing service supervisor for continuous collection. The
 dashboard always binds to IPv4 loopback. Keep its launch link private.
 
+On Windows, launch a headless dashboard through the installed environment's
+Python interpreter with `-m wardr serve --no-browser` so future updates can
+replace the Wardr launcher.
+
 `wardr advisories --refresh` downloads the public CISA catalog. The dashboard
 offers a manual refresh when online or an opt-in six-hour schedule via
 `wardr serve --auto-advisories`. Wardr sends no local inventory or event data in
@@ -125,7 +151,10 @@ its result rather than the uploaded inventory or advisory files. Use
 
 ## Build and verify
 
+Use a development virtual environment for local builds and tests.
+
 ```console
+python -m pip install -e .
 uv build
 python -m unittest discover -s tests -v
 ```
@@ -134,12 +163,14 @@ The Blender scene, procedural render, and editable TripoSR mesh are in
 `design/`. The installed app ships the rendered PNG.
 [TripoSR project](https://github.com/VAST-AI-Research/TripoSR)
 
-The company site publishes release hashes alongside its downloads. For a
-signed release, verify the manifest and the artifact with a trusted Ed25519
-public key obtained independently. Verification uses OpenSSL 3.
+Wardr Community releases starting with v0.2.1 have Ed25519-signed manifests.
+To verify a download manually, use the matching version's manifest and
+detached signature, and a trusted public key obtained independently. Wardr
+verifies downloads offline using PyCA cryptography without an OpenSSL
+command. [Release downloads](https://getwardr.com/#release)
 
 ```console
-wardr verify-release --manifest latest.json --signature latest.json.sig --public-key trusted.pem wardr-0.2.0-py3-none-any.whl
+wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.2.1-py3-none-any.whl
 ```
 
 See the [security policy](SECURITY.md) for private vulnerability reporting and

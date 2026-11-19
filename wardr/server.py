@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import threading
 import webbrowser
@@ -12,10 +13,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import local_ai
+from . import local_ai, updater
 from .plan import html_plan
 from .report import REPORT_CSS, html_report, json_report, report_data
 from .state import BusyError, WardrState
+from .update_session import UpdateSession
 
 STATIC = Path(__file__).with_name("static")
 ASSETS = {
@@ -31,13 +33,18 @@ PAGE_POLICY = (
 REPORT_POLICY = f"default-src 'none'; style-src 'sha256-{REPORT_STYLE_HASH}'; base-uri 'none'; frame-ancestors 'none'"
 REPORTS = ("/report.html", "/report.json", "/plan.html", "/plan.json")
 ASSESSMENT_UPLOAD_LIMIT = 12 * 1024 * 1024
+RESTART_DASHBOARD = object()
 
 
 class DashboardServer(ThreadingHTTPServer):
-    allow_reuse_address = False
+    allow_reuse_address = os.name == "posix"
     daemon_threads = True
 
-    def __init__(self, port: int, state: WardrState):
+    def __init__(self, port: int, state: WardrState, update_blocker: str | None = None):
+        self.page = (STATIC / "index.html").read_bytes()
+        # Serve this process’s asset versions while the next wheel replaces files on disk.
+        self.assets = {url: ((STATIC / name).read_bytes(), kind) for url, (name, kind) in ASSETS.items()}
+        self.updates = UpdateSession(offline=state.offline, blocker=update_blocker)
         super().__init__(("127.0.0.1", port), DashboardRequest)
         self.address = "127.0.0.1" if self.server_port == 80 else f"127.0.0.1:{self.server_port}"
         self.url = f"http://{self.address}"
@@ -100,23 +107,24 @@ class DashboardRequest(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid request path."})
             return
         path = url.path
-        if path in ("/api/status", "/api/defense", "/api/local-ai", *REPORTS) and not self._access_granted():
+        if path in ("/api/status", "/api/defense", "/api/local-ai", "/api/update", *REPORTS) and not self._access_granted():
             self._json(HTTPStatus.FORBIDDEN, {"error": "Open the launch link printed by Wardr to access this dashboard."})
             return
         if path == "/":
-            page = (STATIC / "index.html").read_text(encoding="utf-8")
-            self._respond(HTTPStatus.OK, page, "text/html; charset=utf-8")
+            self._respond(HTTPStatus.OK, self.server.page, "text/html; charset=utf-8")
         elif path == "/api/status":
             self._json(HTTPStatus.OK, self.server.state.status())
         elif path == "/api/defense":
             self._json(HTTPStatus.OK, self.server.state.defense_status())
         elif path == "/api/local-ai":
             self._json(HTTPStatus.OK, local_ai.status())
+        elif path == "/api/update":
+            self._json(HTTPStatus.OK, self.server.updates.status())
         elif path in REPORTS:
             self._report(path, url.query == "download=1")
-        elif path in ASSETS:
-            name, kind = ASSETS[path]
-            self._respond(HTTPStatus.OK, (STATIC / name).read_bytes(), kind)
+        elif path in self.server.assets:
+            content, kind = self.server.assets[path]
+            self._respond(HTTPStatus.OK, content, kind)
         else:
             self._json(HTTPStatus.NOT_FOUND, {"error": "Page not found."})
 
@@ -188,6 +196,18 @@ class DashboardRequest(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self.server.state.assess_software(body["sbom"], body["advisories"]))
             elif self.path == "/api/local-ai/review" and not body:
                 self._json(HTTPStatus.OK, self.server.state.review_plan())
+            elif self.path == "/api/update/check" and not body:
+                self.server.updates.start_check()
+                self._json(HTTPStatus.ACCEPTED, {"ok": True})
+            elif self.path == "/api/update/install":
+                if body.keys() != {"version"} or not isinstance(body["version"], str):
+                    raise ValueError("Choose the verified update version.")
+                self.server.updates.start_install(body["version"])
+                self._json(HTTPStatus.ACCEPTED, {"ok": True})
+            elif self.path == "/api/update/restart" and not body:
+                self.server.updates.request_restart()
+                self._json(HTTPStatus.ACCEPTED, {"ok": True})
+                self.server.shutdown()
             elif self.path == "/api/fix":
                 identifier = body.get("id")
                 if not isinstance(identifier, str) or len(identifier) > 120 or body.keys() != {"id"}:
@@ -199,13 +219,15 @@ class DashboardRequest(BaseHTTPRequestHandler):
             self._json(HTTPStatus.CONFLICT, {"error": str(exc)})
         except ValueError as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except updater.UpdaterError as exc:
+            self._json(HTTPStatus.CONFLICT, {"error": str(exc)})
         except local_ai.LocalAIError as exc:
             self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
         except OSError:
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Wardr could not save the assessment in its state directory."})
 
 
-def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: bool) -> int:
+def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: bool, *, update_blocker: str | None = None):
     stopping = threading.Event()
 
     def repeat(action, seconds: int) -> None:
@@ -215,7 +237,7 @@ def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: boo
             except BusyError:
                 pass
 
-    with DashboardServer(port, state) as server:
+    with DashboardServer(port, state, update_blocker=update_blocker) as server:
         state.monitor.start()
         state.start_scan()
         state.start_exposure()
@@ -236,4 +258,4 @@ def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: boo
         finally:
             stopping.set()
             state.monitor.stop()
-    return 0
+    return RESTART_DASHBOARD if server.updates.restart_requested else 0

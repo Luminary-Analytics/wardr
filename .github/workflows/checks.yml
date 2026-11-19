@@ -22,6 +22,13 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+      - name: Build and install a release wheel
+        shell: bash
+        run: |
+          python -m pip install build
+          python -m build
+          python -m pip install dist/*.whl
+          wardr --help
       - run: python -m unittest discover -s tests -v
       - name: Native collectors and report exports
         shell: bash
@@ -30,10 +37,3 @@ jobs:
           python -m wardr --state-dir .wardr-ci exposure > exposure.json
           python -m wardr --state-dir .wardr-ci plan --format json > plan.json
           python -c 'import json; from pathlib import Path; scan, exposure, plan = [json.loads(Path(name).read_text(encoding="utf-8")) for name in ("scan.json", "exposure.json", "plan.json")]; assert scan["checks"] and exposure["coverage"] and plan["sources"]'
-      - name: Build and install a release wheel
-        shell: bash
-        run: |
-          python -m pip install build
-          python -m build
-          python -m pip install --no-deps dist/*.whl
-          wardr --help

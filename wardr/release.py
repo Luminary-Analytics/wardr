@@ -5,7 +5,6 @@ import hmac
 import json
 import re
 import subprocess
-import tempfile
 from pathlib import Path
 
 
@@ -50,30 +49,30 @@ def sign_manifest(manifest, signing_key, signature, public_key):
         raise ReleaseError("OpenSSL could not export the release public key.")
 
 
+def verify_manifest_signature(manifest_bytes, signature_bytes, public_key_bytes):
+    if not 0 < len(manifest_bytes) <= 64 * 1024 or len(signature_bytes) != 64 or not 0 < len(public_key_bytes) <= 2048:
+        raise ReleaseError("The release signature data has an invalid size.")
+    try:
+        from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
+    except ImportError as exc:
+        raise ReleaseError("The release verification library is unavailable. Reinstall Wardr in its environment.") from exc
+    try:
+        public_key = load_pem_public_key(public_key_bytes)
+        if not isinstance(public_key, Ed25519PublicKey):
+            raise ValueError("Expected an Ed25519 public key")
+    except (UnsupportedAlgorithm, ValueError, TypeError) as exc:
+        raise ReleaseError("Provide a trusted Ed25519 public key in PEM format.") from exc
+    try:
+        public_key.verify(signature_bytes, manifest_bytes)
+    except InvalidSignature as exc:
+        raise ReleaseError("The release signature does not match the supplied trusted key.") from exc
+
+
 def verify_release(manifest, signature, public_key, artifact):
     manifest_bytes = _read_bounded(manifest, 64 * 1024)
-    signature_bytes = _read_bounded(signature, 64)
-    key_bytes = _read_bounded(public_key, 2048)
-    # Ed25519 SubjectPublicKeyInfo begins with OID 1.3.101.112 and a 32-byte key.
-    import base64
-    import binascii
-
-    try:
-        pem = key_bytes.strip().splitlines()
-        if pem[0] != b"-----BEGIN PUBLIC KEY-----" or pem[-1] != b"-----END PUBLIC KEY-----":
-            raise ValueError("Invalid public key")
-        key_der = base64.b64decode(b"".join(pem[1:-1]), validate=True)
-    except (ValueError, IndexError, binascii.Error) as exc:
-        raise ReleaseError("Provide a trusted Ed25519 public key in PEM format.") from exc
-    if len(signature_bytes) != 64 or len(key_der) != 44 or not key_der.startswith(bytes.fromhex("302a300506032b6570032100")):
-        raise ReleaseError("Provide a trusted Ed25519 key and signature.")
-    with tempfile.TemporaryDirectory(prefix="wardr-signature-") as directory:
-        payload, sig, key = (Path(directory) / name for name in ("manifest.json", "manifest.sig", "trusted.pem"))
-        for path, contents in ((payload, manifest_bytes), (sig, signature_bytes), (key, key_bytes)):
-            path.write_bytes(contents)
-        args = ("pkeyutl", "-verify", "-rawin", "-pubin", "-inkey", key, "-in", payload, "-sigfile", sig)
-        if _openssl(args).returncode:
-            raise ReleaseError("The release signature does not match the supplied trusted key.")
+    verify_manifest_signature(manifest_bytes, _read_bounded(signature, 64), _read_bounded(public_key, 2048))
 
     try:
         document = json.loads(manifest_bytes)

@@ -9,8 +9,8 @@ the workflow with sample data. [Wardr homepage](https://getwardr.com/) ·
 
 The Community release focuses on single-host posture, local exposure, selected
 event patterns, and matching supplied software inventories to published
-advisories. It requires Python 3.11 or newer and uses the Python standard
-library at runtime. Operating-system tools and access vary by platform.
+advisories. It requires Python 3.11 or newer. Wardr uses PyCA cryptography
+for Ed25519 verification. Operating-system tools and access vary by platform.
 
 ## Components and data flow
 
@@ -43,6 +43,7 @@ The public site runs separately from the installed product.
 | Reporting and prioritization | `wardr/report.py`, `wardr/plan.py` | Scan and plan views with text, JSON, and HTML exports |
 | Optional model review | `wardr/local_ai.py` | Suggested groups of existing plan tasks |
 | Release verification | `wardr/release.py` | Ed25519 manifest validation and SHA-256 artifact verification |
+| Application updates | `wardr/updater.py`, `wardr/update_session.py` | Signed release checks, isolated installation, and dashboard update state |
 
 At dashboard startup, Wardr loads saved scan and software assessment results,
 starts the monitor, and requests a fresh scan and exposure snapshot. Device
@@ -136,17 +137,36 @@ bundled dashboard.
 | `POST /api/software/assess` | Validate a bounded JSON import and save the computed result |
 | `POST /api/fix` | Apply an eligible repair by check ID |
 | `GET /api/local-ai`, `POST /api/local-ai/review` | Read model readiness and request an optional review |
+| `GET /api/update`, `POST /api/update/check`, `POST /api/update/install`, `POST /api/update/restart` | Read update status, confirm each release action, and restart the dashboard |
 
 CISA refresh is opt-in. It downloads the public catalog without including
 local inventory or event data. `wardr serve --offline` disables dashboard
-catalog downloads and retains access to the existing cache. See the
-[development and operations guide](DEVELOPMENT.md) for the model workflow.
+catalog downloads and release checks. The existing cache remains available.
+See the [development and operations guide](DEVELOPMENT.md) for the model
+workflow.
 
 Wardr's optional review connects to Ollama at `127.0.0.1:11434` and checks the
 pinned manifest digest for `qwen2.5:1.5b`. It sends temporary item numbers,
 task categories, and priorities. Wardr validates the selected items against
 the plan and displays predefined review guidance. The model cannot authorize
 or execute a repair. Preparing the model is a separate, explicit operation.
+
+### Release updates
+
+The dashboard and CLI check for releases only on request. The updater fetches
+the Community manifest and its detached, versioned Ed25519 signature over
+HTTPS from `getwardr.com`. It verifies the exact manifest bytes against the
+public key packaged with the running app. For a newer release, it downloads
+the versioned wheel and validates its SHA-256 digest, size, and package
+metadata before calling the isolated environment's installer. Update
+requests send no device findings, inventory, or event data.
+
+An installation lock serializes dashboard and CLI installs in the same
+environment. The updater passes only the verified wheel to pip or uv and
+installs without package-index access. Dependency changes require a manual
+upgrade. The installer replaces the package in its current environment and
+keeps the per-user Wardr data directory. The dashboard reports the running
+and installed versions separately until the user restarts it.
 
 ## Coverage limits
 

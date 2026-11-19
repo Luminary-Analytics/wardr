@@ -23,6 +23,9 @@ const state = {
   pendingModel: false,
   model: null,
   modelReview: null,
+  update: null,
+  updateError: null,
+  pendingUpdate: null,
   connected: false,
   pendingScan: false,
   pendingIntel: false,
@@ -37,6 +40,7 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", tim
 const numberFormat = new Intl.NumberFormat();
 let refreshRequest;
 let defenseRequest;
+let updateRequest;
 let defenseRefreshed = 0;
 let pollTimer;
 let pollGeneration = 0;
@@ -161,6 +165,7 @@ function renderControls() {
     button.disabled = !state.connected || !ready || state.pendingReport;
   }
   renderDefenseControls();
+  renderUpdates();
 }
 
 function renderNotice() {
@@ -456,8 +461,10 @@ async function poll() {
   await refresh();
   if (generation !== pollGeneration || state.needsLaunch) return;
   if (state.view === "defense" && state.connected) await refreshDefense();
+  if (element("updates-dialog").open && updateWorking()) await refreshUpdates();
   if (generation !== pollGeneration || state.needsLaunch) return;
-  const busy = state.data?.scan.state === "running" || state.data?.intel.state === "running" || state.defense?.exposure.running;
+  const busy = state.data?.scan.state === "running" || state.data?.intel.state === "running"
+    || state.defense?.exposure.running || (element("updates-dialog").open && updateWorking());
   pollTimer = window.setTimeout(poll, document.hidden ? 15000 : busy ? 1200 : 4000);
 }
 
@@ -468,6 +475,120 @@ function errorText(error, fallback) {
   }
   if (error.name === "AbortError" || error instanceof TypeError || error instanceof SyntaxError) return fallback;
   return error.message || fallback;
+}
+
+const updateViews = {
+  idle: ["", "Check for a signed Wardr release."],
+  checking: ["Checking for updates", "Verifying the latest release information."],
+  current: ["Wardr is up to date", ""],
+  available: ["Update available", "Wardr will verify the download and update this installation."],
+  installing: ["Installing update", "Wardr is downloading, verifying, and installing the release."],
+  installed: ["Update installed", "Restart Wardr to use the installed version."],
+  restarting: ["Restarting Wardr", "Open the new Wardr window or use the launch link printed in your terminal."],
+  unavailable: ["Updates unavailable", ""],
+  error: ["Update could not complete", ""],
+};
+const updateProgress = { check: "checking", install: "installing", restart: "restarting" };
+
+function updateWorking() {
+  return ["checking", "installing"].includes(state.update?.state);
+}
+
+function updateCommand() {
+  if (!state.connected || state.pendingUpdate || updateRequest || updateWorking()) return null;
+  if (!state.update && state.updateError) return "status";
+  if (state.update?.state === "installed" && state.update.can_restart === true) return "restart";
+  if (state.data?.offline || state.update?.state === "restarting") return null;
+  if (state.update?.state === "available" && state.update.can_update === true && state.update.available_version) return "install";
+  return state.update?.can_check === true ? "check" : null;
+}
+
+function renderUpdates() {
+  element("updates-button").disabled = !state.connected;
+  const update = state.update;
+  const phase = updateProgress[state.pendingUpdate] || update?.state;
+  const [heading, description] = Object.hasOwn(updateViews, phase) ? updateViews[phase] : ["", "Loading update status…"];
+  const offline = state.data?.offline && !["installed", "restarting"].includes(phase);
+  const target = update?.installed_version || update?.available_version;
+  setText("update-current-version", update?.current_version || "—");
+  element("update-target").hidden = !target;
+  setText("update-target-label", update?.installed_version ? "Installed update" : "Available version");
+  setText("update-target-version", target || "");
+  setText("update-heading", state.updateError ? "Update action could not complete" : offline ? "Offline mode" : heading);
+  setText("update-message", state.updateError || (offline ? "Update checks are paused in offline mode." : "")
+    || (state.pendingUpdate ? description : update?.message || description));
+  element("update-feedback").dataset.tone = state.updateError || phase === "error" ? "error" : "";
+
+  const command = updateCommand();
+  const button = element("update-action");
+  button.hidden = !command && !state.pendingUpdate && !updateWorking()
+    && (offline || ["installed", "unavailable"].includes(phase));
+  button.disabled = !command;
+  const actionLabel = {
+    status: "Retry",
+    install: "Update Wardr",
+    restart: "Restart Wardr",
+    check: "Check for updates",
+  }[command];
+  const progressLabel = { checking: "Checking…", installing: "Installing…", restarting: "Restarting…" }[phase];
+  setText("update-action", actionLabel || progressLabel || "Check for updates");
+}
+
+function refreshUpdates() {
+  if (updateRequest) return updateRequest;
+  if (state.needsLaunch || !state.connected || state.pendingUpdate || state.update?.state === "restarting") {
+    return Promise.resolve();
+  }
+  const requestedToken = token;
+  const pending = request("/api/update")
+    .then((update) => {
+      if (requestedToken !== token) return;
+      state.update = update;
+      state.updateError = null;
+    })
+    .catch((error) => {
+      if (requestedToken === token) state.updateError = errorText(error, "Wardr could not read the update status.");
+    })
+    .finally(() => {
+      if (updateRequest !== pending) return;
+      updateRequest = null;
+      renderUpdates();
+    });
+  updateRequest = pending;
+  renderUpdates();
+  return pending;
+}
+
+async function runUpdateCommand() {
+  const command = updateCommand();
+  if (!command) return;
+  state.updateError = null;
+  if (command === "status") {
+    await refreshUpdates();
+    return;
+  }
+  const requestedToken = token;
+  const body = command === "install" ? { version: state.update.available_version } : {};
+  state.pendingUpdate = command;
+  renderUpdates();
+  let accepted = false;
+  try {
+    await request("/api/update/" + command, body);
+    if (requestedToken !== token) return;
+    state.update = { ...state.update, state: updateProgress[command], message: "" };
+    accepted = true;
+  } catch (error) {
+    if (requestedToken === token) state.updateError = errorText(error, "Wardr could not start the update action. Try again.");
+  } finally {
+    if (requestedToken === token) {
+      state.pendingUpdate = null;
+      renderUpdates();
+      if (accepted && command !== "restart") {
+        await refreshUpdates();
+        poll();
+      }
+    }
+  }
 }
 
 async function openReport(event) {
@@ -936,6 +1057,12 @@ element("local-model-review").addEventListener("click", () => runModelAction(tru
 
 element("scan-button").addEventListener("click", startScan);
 element("intel-button").addEventListener("click", refreshIntel);
+element("updates-button").addEventListener("click", () => {
+  element("updates-dialog").showModal();
+  refreshUpdates();
+});
+element("close-updates").addEventListener("click", () => element("updates-dialog").close());
+element("update-action").addEventListener("click", runUpdateCommand);
 for (const button of document.querySelectorAll("[data-report]")) {
   button.addEventListener("click", openReport);
 }
@@ -958,6 +1085,11 @@ window.addEventListener("hashchange", () => {
     state.needsLaunch = !token;
     refreshRequest = null;
     defenseRequest = null;
+    updateRequest = null;
+    state.update = null;
+    state.updateError = null;
+    state.pendingUpdate = null;
+    element("updates-dialog").close();
     state.defense = null;
     state.model = null;
     state.modelReview = null;

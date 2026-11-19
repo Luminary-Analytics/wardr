@@ -3,18 +3,21 @@
 import argparse
 import io
 import json
+import os
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
 
-from . import assessment, checks, exposure, hunting, intel, local_ai
+from . import assessment, checks, exposure, hunting, intel, local_ai, updater
 from .monitor import Monitor
 from .plan import build_plan, html_plan, prioritize_software, text_plan
 from .release import ReleaseError, verify_release
 from .report import html_report, json_report, report_data, text_report
-from .server import serve
+from .server import RESTART_DASHBOARD, serve
 from .state import WardrState, default_state_dir, host_info, prepare_state_dir, read_software, save_local_json
+from .update_session import installation_lock
 
 
 def _integer(value: str, minimum: int, maximum: int) -> int:
@@ -41,7 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     network = dashboard.add_mutually_exclusive_group()
     network.add_argument("--auto-advisories", action="store_true",
                          help="Download the public CISA catalog on startup and every six hours.")
-    network.add_argument("--offline", action="store_true", help="Disable public advisory downloads.")
+    network.add_argument("--offline", action="store_true", help="Disable public advisory and Wardr update downloads.")
 
     scan = commands.add_parser("scan", help="Run local checks and write a report to stdout.")
     scan.add_argument("--format", choices=("text", "json", "html"), default="text")
@@ -63,6 +66,8 @@ def _parser() -> argparse.ArgumentParser:
     integrity.add_argument("--signature", required=True, type=Path)
     integrity.add_argument("--public-key", required=True, type=Path)
     integrity.add_argument("artifact", type=Path)
+    update = commands.add_parser("update", help="Check or install a signed Wardr update in this environment.")
+    update.add_argument("--check", action="store_true", help="Check for an update without installing it.")
     return parser
 
 
@@ -102,11 +107,59 @@ def _collect_plan(directory: Path) -> dict:
     return build_plan(host_info(), scan, inventory, events, software)
 
 
+def _relaunch_dashboard(arguments: list[str]) -> int:
+    executable = os.path.abspath(sys.executable)
+    command = [executable, "-I", "-m", "wardr", *arguments]
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if os.name == "nt":
+        subprocess.Popen(command)
+        return 0
+    os.execv(executable, command)
+
+
+def _serve_dashboard(directory: Path, args, arguments: list[str], windows_launcher: bool) -> int:
+    explicit = args.command == "serve"
+    open_browser = not explicit or not args.no_browser
+    if windows_launcher and open_browser and not (explicit and args.offline) and not updater.installation_problem():
+        # Windows locks an active console launcher. Run the desktop in the Python
+        # interpreter so a later update can replace its original launcher.
+        return _relaunch_dashboard(arguments)
+    state = WardrState(directory, args.interval if explicit else 30, offline=explicit and args.offline)
+    update_blocker = (
+        "Windows keeps wardr.exe open here. Start Wardr with the environment’s Python using -m wardr serve."
+        if windows_launcher else None
+    )
+    outcome = serve(state, args.port if explicit else 0, open_browser, explicit and args.auto_advisories,
+                    update_blocker=update_blocker)
+    if outcome is RESTART_DASHBOARD:
+        return _relaunch_dashboard(arguments)
+    return 0
+
+
+def _update_cli(check_only: bool) -> int:
+    if problem := updater.installation_problem():
+        raise updater.UpdaterError(problem)
+    with installation_lock():
+        available = updater.check_for_update()
+        if available:
+            if check_only:
+                print(f"Wardr {available.version} is available. Open Updates in Wardr to install it.")
+            else:
+                version = updater.install_update(available)
+                print(f"Installed Wardr {version}. Restart any running Wardr dashboard.")
+        else:
+            print("Your Wardr installation is up to date.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     if sys.platform == "win32" and isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
     parser = _parser()
-    args = parser.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(arguments)
+    windows_launcher = argv is None and os.name == "nt" and Path(sys.argv[0]).name.lower() == "wardr.exe"
     directory = args.state_dir.expanduser().resolve() if args.state_dir else default_state_dir()
     previous_term = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGTERM, _interrupt)
@@ -143,14 +196,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json_report(result), end="")
         elif args.command == "verify-release":
             print(json_report(verify_release(args.manifest, args.signature, args.public_key, args.artifact)), end="")
-        elif args.command == "serve":
-            return serve(WardrState(directory, args.interval, offline=args.offline),
-                         args.port, not args.no_browser, args.auto_advisories)
+        elif args.command == "update":
+            if windows_launcher and not args.check:
+                raise updater.UpdaterError(f'Use the Updates button or run "{sys.executable}" -m wardr update.')
+            return _update_cli(args.check)
         else:
-            return serve(WardrState(directory), 0, True, False)
+            return _serve_dashboard(directory, args, arguments, windows_launcher)
     except KeyboardInterrupt:
         return 0
-    except (OSError, assessment.AssessmentError, intel.AdvisoryError, local_ai.LocalAIError, ReleaseError) as exc:
+    except (OSError, assessment.AssessmentError, intel.AdvisoryError, local_ai.LocalAIError, ReleaseError, updater.UpdaterError) as exc:
         print(f"Wardr: {exc}", file=sys.stderr)
         return 1
     finally:

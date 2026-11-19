@@ -20,11 +20,17 @@ unrelated logs. Avoid public disclosure while maintainers assess the report.
 
 ## Release integrity
 
-The download site publishes SHA-256 hashes and a versioned manifest. A
-release owner can also sign the manifest with an Ed25519 key kept outside
-source control and hosting. Verify the release with a public key obtained
-through a separate trusted channel. A checksum delivered by the download
-site detects mismatched files. A pinned signing key establishes provenance.
+Starting with Wardr 0.2.1, the download site publishes versioned release
+manifests with detached Ed25519 signatures. Each manifest records the
+SHA-256 digest and byte count of its artifacts. The updater verifies each
+manifest with the release public key bundled in the installed app, then
+checks the selected wheel against the signed metadata before installation.
+It offers only newer versions to prevent downgrades.
 
-The README describes how to verify a wheel. The company site repository
-documents the signing and publication workflow.
+Keep the release private key outside both repositories and the hosting
+environment. Public copies on the download site are available for
+inspection. For independent manual verification, obtain the trusted public
+key through a separate channel. Coordinate any key rotation with the
+installed app's key pin before publishing updates under the replacement key.
+[Verify a wheel](README.md#build-and-verify) ·
+[Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)

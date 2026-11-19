@@ -32,17 +32,25 @@ data for the browser demo. [Wardr demo](https://getwardr.com/#demo)
 | No repair option is offered | Run a fresh scan and review the finding. The checklist offers automatic repair only for eligible SSH permission failures on macOS and Linux. |
 | Software assessment has no matches | Confirm that the CycloneDX data contains versioned package identifiers and that the supplied OSV records cover those packages. Review unassessed entries in the assessment summary. |
 | The local model is unavailable | Run `wardr model status` and check that Ollama is running locally and the pinned model is ready. The deterministic remediation plan is available independently. |
+| In-place updates are unavailable | Install a published wheel in a pipx or Python virtual environment. Confirm pip is available to Wardr's interpreter or uv is on `PATH`, and check that the dashboard is online. |
+| The update requires manual installation | Download and verify the published wheel. Close Wardr and use your package manager to install the wheel and its dependencies into the same environment. |
+| An update cannot replace the Windows launcher | Close other Wardr processes. Invoke the environment's Python interpreter directly with `-m wardr update` or run the dashboard with `-m wardr serve`. |
+| Installation was interrupted or failed partway | Close every Wardr process. Download and verify the intended release wheel, reinstall it in the existing environment using its package manager, and confirm the new version in **Updates** after launch. For pipx, use `pipx install --force` with that wheel. |
 
 To monitor a server continuously, run `wardr watch` under the account you
 want to observe with your existing process supervisor. It emits each new event
 as JSON Lines on standard output and coverage updates on standard error.
 Dashboard mode also monitors while the process is running. It allows a
 separate poll interval through `wardr serve --interval <seconds>`.
+On Windows, invoke the installed environment's Python with
+`-m wardr serve --no-browser` for a headless dashboard. This leaves the Wardr
+launcher available for a future package replacement.
 
 For offline use, provide the CycloneDX inventory and OSV advisory records
 as local files. If you want optional AI review, run `wardr model pull` while
 connected, confirm readiness with `wardr model status`, and then start
-`wardr serve --offline`. Ollama manages the model files and can be configured
+`wardr serve --offline`. That dashboard session disables public advisory and
+Wardr update downloads. Ollama manages the model files and can be configured
 to disable its cloud features. [Ollama offline settings](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
 
 - `wardr scan --format json` exports a device scan.
@@ -51,18 +59,25 @@ to disable its cloud features. [Ollama offline settings](https://docs.ollama.com
   assessment results for the selected state directory.
 - `wardr plan --format html` builds an exportable remediation plan.
 - `wardr advisories --refresh` explicitly downloads a fresh CISA catalog.
+- `wardr update --check` checks the signed release channel. `wardr update`
+  checks and installs an eligible newer release. Both commands require
+  network access. Restart any running Wardr process after an install.
 
 ## Tests and packaging
 
+Use a development virtual environment for local builds and tests.
+
 ```console
+python -m pip install -e .
 python -m unittest discover -s tests -v
 uv build
 ```
 
 Unit tests cover dashboard access, posture parsing and SSH repair safety,
 socket-table interpretation, inventory matching, hunting rules, and the
-local-model interface. The native GitHub Actions job uses Python 3.11 on
-Ubuntu, macOS, and Windows. It also exercises the CLI collectors and plan
+local-model interface. Release tests also exercise signature and artifact
+verification and installation eligibility. The native GitHub Actions job uses
+Python 3.11 on Ubuntu, macOS, and Windows. It exercises the CLI collectors and plan
 export, builds a wheel and source archive, installs the wheel, and checks
 the installed entry point. Full collector coverage still depends on the
 host and account behind the test. [CI workflow](../.github/workflows/checks.yml)
@@ -75,20 +90,23 @@ Blender is only needed to edit or re-render the supplied brand assets.
 ## Release and website handoff
 
 1. Confirm the intended version in `pyproject.toml` and check the native CI
-   results. Build the wheel and source archive from the intended software revision.
+   results. Build the wheel and source archive from the intended software
+   revision. Confirm the wheel includes `wardr/keys/release.pem` and sign
+   with its corresponding private key.
 2. Prepare the GitHub release with the wheel and archive from `dist/`.
    Use that same software checkout and artifacts to build the company site.
 3. In the site checkout, run its release build and validation. It stages the
-   downloads, SHA-256 checksums, versioned release manifest, and optional
-   signature. Publish the validated site files through the site's Render
-   Blueprint. [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
+   downloads, SHA-256 checksums, versioned release manifest, and detached
+   Ed25519 signature. The signing step uses OpenSSL 3. Publish the validated
+   site files through the site's Render Blueprint. [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
 4. On the public site, verify that the download points to the intended
-   wheel and that the published checksum agrees with the release artifact.
-   For signed releases, verify the manifest and artifact with `wardr verify-release`
-   and a separately trusted Ed25519 public key. [Wardr homepage](https://getwardr.com/)
+   wheel from both the homepage and the verified demo. Use
+   `wardr verify-release` with the downloaded manifest, versioned signature,
+   and a separately trusted Ed25519 public key. Check the live feed from a
+   clean install of the new wheel. [Wardr homepage](https://getwardr.com/)
 
-Keep private signing keys outside both repositories. SHA-256 checksums allow
-download integrity checks. An Ed25519 signature verifies release provenance
-when the verifier already trusts the public key. The
-[security policy](../SECURITY.md) covers vulnerability reporting and release
-integrity.
+Wardr 0.2.0 users install the 0.2.1 wheel manually. Test an in-place upgrade
+using a disposable installation with the updater and a newer signed release.
+Keep the release signing key outside both repositories and Render. Consumers
+verify using PyCA cryptography, which runs without an external OpenSSL
+command. [Security policy](../SECURITY.md)
