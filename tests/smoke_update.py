@@ -172,14 +172,18 @@ def verify_wheel_bytes(data, record):
         raise ValueError(f"{record['name']} does not match its signed production manifest")
 
 
+def release_public_key(pem):
+    key = serialization.load_pem_public_key(pem)
+    if not isinstance(key, ed25519.Ed25519PublicKey):
+        raise ValueError("The Wardr release key must be Ed25519")
+    return key
+
+
 def production_assets(baseline, target):
     current = wheel_version(baseline)
     if not re.fullmatch(VERSION, target) or tuple(map(int, target.split("."))) <= tuple(map(int, current.split("."))):
         raise ValueError("--live-target must name a stable release newer than the baseline wheel")
-    pinned = RELEASE_KEY.read_bytes()
-    key = serialization.load_pem_public_key(pinned)
-    if not isinstance(key, ed25519.Ed25519PublicKey):
-        raise ValueError("The Wardr release key must be Ed25519")
+    key = release_public_key(RELEASE_KEY.read_bytes())
     published_baseline = production_wheel_record(f"/releases/{current}/release.json", current, key)
     with baseline.open("rb") as handle:
         baseline_data = handle.read(published_baseline["bytes"] + 1)
@@ -188,8 +192,10 @@ def production_assets(baseline, target):
     target_data = production_download(published_target["url"], published_target["bytes"])
     verify_wheel_bytes(target_data, published_target)
     with ZipFile(io.BytesIO(baseline_data)) as original, ZipFile(io.BytesIO(target_data)) as updated:
-        if original.read("wardr/keys/release.pem") != pinned or updated.read("wardr/keys/release.pem") != pinned:
-            raise ValueError("The production wheels do not carry the same pinned Wardr release key")
+        for wheel in (original, updated):
+            bundled = release_public_key(wheel.read("wardr/keys/release.pem"))
+            if bundled.public_bytes_raw() != key.public_bytes_raw():
+                raise ValueError("The production wheels do not carry the same pinned Wardr release key")
         before_html = original.read("wardr/static/index.html")
         after_html = updated.read("wardr/static/index.html")
     return current, before_html, after_html, published_target["sha256"]
@@ -197,19 +203,21 @@ def production_assets(baseline, target):
 
 def require_live_installation(python, current):
     result = subprocess.check_output([str(python), "-I", "-c", """
-import hashlib
 import importlib.util
 import json
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from wardr import updater
 
+key = load_pem_public_key(updater._PUBLIC_KEY.read_bytes())
 print(json.dumps([updater.current_version(), updater.installation_problem(),
                   importlib.util.find_spec('sitecustomize') is not None,
-                  updater.RELEASE_HOST, hashlib.sha256(updater._PUBLIC_KEY.read_bytes()).hexdigest()]))
+                  updater.RELEASE_HOST, key.public_bytes_raw().hex()]))
 """], text=True, timeout=15)
-    version, problem, customized, host, key_digest = json.loads(result)
+    version, problem, customized, host, installed_key = json.loads(result)
     if version != current or problem or customized or host != HOST:
         raise ValueError("Live smoke requires the official baseline in a fresh, updatable environment without sitecustomize")
-    if key_digest != hashlib.sha256(RELEASE_KEY.read_bytes()).hexdigest():
+    expected_key = release_public_key(RELEASE_KEY.read_bytes()).public_bytes_raw().hex()
+    if installed_key != expected_key:
         raise ValueError("The installed runtime does not have the official pinned release key")
 
 
