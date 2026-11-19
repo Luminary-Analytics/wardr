@@ -107,7 +107,7 @@ class DraftReleaseTests(unittest.TestCase):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.files = [Path(temporary.name) / name for name in ("release.json", "release.json.sig")]
-        self.release = {"id": 37, "tag_name": f"v{VERSION}", "draft": True, "prerelease": False}
+        self.release = {"id": 37, "tag_name": f"v{VERSION}", "draft": True, "prerelease": True}
         self.remote = {}
         self.writes = []
         for path in self.files:
@@ -148,6 +148,14 @@ class DraftReleaseTests(unittest.TestCase):
         github.promote(VERSION, self.files)
         self.assertFalse(github.stage_draft(VERSION, self.files))
         self.assertEqual(self.writes, [("upload", "release.json.sig"), ("promote", 37)])
+
+    def test_a_new_draft_keeps_the_community_prerelease_status(self):
+        results = (None, self.release, self.release)
+        with patch.object(github, "_find_release", side_effect=results), patch.object(github, "_gh") as cli:
+            self.assertTrue(github.stage_draft(VERSION, self.files))
+        cli.assert_called_once()
+        self.assertIn("--prerelease", cli.call_args.args)
+        self.assertIn("--verify-tag", cli.call_args.args)
 
     def test_conflicting_existing_asset_blocks_staging(self):
         self.remote["release.json"]["digest"] = "sha256:" + "f" * 64

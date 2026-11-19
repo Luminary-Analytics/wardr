@@ -116,8 +116,9 @@ check the Render deploy log and rerun the same command after resolving it.
    build and test the native installers and run the platform signing steps.
 3. It uploads the verified artifacts to a GitHub draft, checks the uploaded
    bytes, and stages and validates the company site with signed app and
-   installer catalogs. It publishes the draft, pushes the site for Render
-   to deploy, then verifies the live site, feed, and downloads over HTTPS.
+   installer catalogs. It publishes with the existing GitHub prerelease
+   status, pushes the site for Render to deploy, then verifies the live
+   site, feed, and downloads over HTTPS.
    [Site release guide](https://github.com/Luminary-Analytics/wardr-site/blob/main/docs/release-and-hosting.md)
 
 Keep the Wardr release key local and outside the repositories. Keep platform

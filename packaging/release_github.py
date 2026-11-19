@@ -76,7 +76,7 @@ def _pages(path, field=None):
 
 def _version(version):
     if not isinstance(version, str) or not re.fullmatch(_VERSION, version):
-        raise ReleaseError("Use a stable Wardr release version such as 0.2.1.")
+        raise ReleaseError("Use a Wardr release version such as 0.2.1.")
     return version
 
 
@@ -301,8 +301,8 @@ def _find_release(tag):
         return None
     release = matches[0]
     _id(release.get("id"), "release")
-    if type(release.get("draft")) is not bool or release.get("prerelease") is True:
-        raise ReleaseError(f"GitHub release {tag} is not a stable Wardr release.")
+    if type(release.get("draft")) is not bool or release.get("prerelease") is not True:
+        raise ReleaseError(f"GitHub release {tag} must use the existing Wardr Community prerelease status.")
     return release
 
 
@@ -350,8 +350,8 @@ def stage_draft(version, assets):
     release = _find_release(tag)
     if release is None:
         try:
-            _gh("release", "create", tag, "--repo", f"github.com/{PUBLIC_REPO}", "--draft", "--verify-tag",
-                "--title", f"Wardr Community {tag}", "--notes", "Download Wardr for your platform below.")
+            _gh("release", "create", tag, "--repo", f"github.com/{PUBLIC_REPO}", "--draft", "--prerelease", "--verify-tag",
+                "--title", f"Wardr Community {version}", "--notes", "Download Wardr for your platform below.")
         except ReleaseError:
             release = _find_release(tag)
             if release is None:
