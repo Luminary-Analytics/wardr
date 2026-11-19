@@ -8,7 +8,7 @@ clear how to fix and verify security gaps. Community is free under the
 The installed application checks host settings, inventories local network
 bindings, correlates selected security events, and matches supplied software
 inventories to published advisories. It combines those findings into a
-remediation plan. [Wardr homepage and demo](https://wardr.onrender.com/)
+remediation plan. [Wardr homepage and demo](https://getwardr.com/)
 
 ## Project documentation
 

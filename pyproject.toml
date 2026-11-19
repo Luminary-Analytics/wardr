@@ -18,6 +18,9 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 
+[project.urls]
+Homepage = "https://getwardr.com/"
+
 [project.scripts]
 wardr = "wardr.cli:main"
 

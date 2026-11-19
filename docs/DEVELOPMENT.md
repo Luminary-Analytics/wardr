@@ -21,7 +21,7 @@ python -m wardr --state-dir /path/to/disposable/wardr-state serve --no-browser -
 
 The server prints its private dashboard URL. The CLI and dashboard collect data
 from the machine and account running the process. The public site uses sample
-data for the browser demo. [Wardr demo](https://wardr.onrender.com/#demo)
+data for the browser demo. [Wardr demo](https://getwardr.com/#demo)
 
 ## Operate and troubleshoot
 
@@ -85,7 +85,7 @@ Blender is only needed to edit or re-render the supplied brand assets.
 4. On the public site, verify that the download points to the intended
    wheel and that the published checksum agrees with the release artifact.
    For signed releases, verify the manifest and artifact with `wardr verify-release`
-   and a separately trusted Ed25519 public key. [Wardr homepage](https://wardr.onrender.com/)
+   and a separately trusted Ed25519 public key. [Wardr homepage](https://getwardr.com/)
 
 Keep private signing keys outside both repositories. SHA-256 checksums allow
 download integrity checks. An Ed25519 signature verifies release provenance

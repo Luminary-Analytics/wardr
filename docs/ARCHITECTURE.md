@@ -4,7 +4,7 @@ Wardr Community helps people harden desktops and servers they manage. An
 operator should be able to see what a check observed, understand the risk,
 take an appropriate action, and verify the result. Wardr keeps that workflow
 on the assessed host. The public website distributes releases and illustrates
-the workflow with sample data. [Wardr homepage](https://wardr.onrender.com/) ·
+the workflow with sample data. [Wardr homepage](https://getwardr.com/) ·
 [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
 
 The Community release focuses on single-host posture, local exposure, selected

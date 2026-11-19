@@ -360,6 +360,7 @@ h1, h2, h3 { color: var(--ink); }
 .defense-model > p { margin: 8px 0; }
 .defense-model .check-list:not(:empty) { margin-top: 10px; }
 .footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; color: var(--muted); font-size: .79rem; padding: 20px 0 24px; }
+.footer a { text-underline-offset: 3px; }
 
 .dialog { max-width: min(420px, calc(100% - 28px)); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; padding: 0; box-shadow: 0 14px 55px #061a1052; }
 .dialog::backdrop { background: #10291f70; }
