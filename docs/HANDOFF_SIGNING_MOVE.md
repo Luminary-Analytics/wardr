@@ -1,7 +1,10 @@
 # Handoff: moving Wardr's installer signing into this repository
 
 Status: to do. Written November 20, 2026, for the Wardr maintainer session that
-takes this on. Nothing described under "Work to do" exists yet.
+takes this on. **Start from the draft pull request
+[#2](https://github.com/Luminary-Analytics/wardr/pull/2)**, which implements the
+design below (the workflows, the runner change, its tests and docs). It has not
+run against GitHub or the signing services, and it isn't merged.
 
 ## The decision
 
@@ -110,6 +113,8 @@ Entra ID. Names only; values never go in this repository.
    any rule on `main` must still let the releasing maintainer push it.
 
 ## Work to do in this repository
+
+Draft #2 does items 1 to 3; review it, finish it and run it.
 
 1. Add the three workflows, for example `release-windows.yml`,
    `release-macos.yml` and `release-linux.yml`, ported from the
