@@ -1,0 +1,120 @@
+name: Wardr release installers (Linux)
+
+# Builds the Linux installers for a release from Wardr's own source and the sealed
+# wheel on the draft release vX.Y.Z (packaging/signing/README.md). Linux installers
+# aren't signed, so this needs no environment and no secret. Only a sign-vX.Y.Z tag on
+# main starts it; pull requests never do. Nothing is kept as an Actions artifact,
+# which anyone could download from this public repository: the verified installer
+# goes straight onto the draft release.
+
+on:
+  push:
+    tags:
+      - 'sign-v*.*.*'
+
+permissions: {}
+
+concurrency:
+  group: release-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, arch: x64}
+          - {os: ubuntu-24.04-arm, arch: arm64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: write   # read the draft release and put the verified installer on it
+    env:
+      WARDR_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Read the signing request on a tag on main
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          tagged="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          test "$tagged" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$tagged" refs/remotes/origin/main
+          python -I packaging/signing/read_request.py "$GITHUB_REF" > request.out
+          cat request.out >> "$GITHUB_OUTPUT"
+          commit="$(sed -n 's/^commit=//p' request.out)"
+          git merge-base --is-ancestor "$commit" "$tagged"
+      - name: Find the draft release
+        id: draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+        run: python -I packaging/signing/release_draft.py find --tag "v$WARDR_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Download the sealed wheel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          WARDR_WHEEL_SHA256: ${{ steps.request.outputs.wheel_sha256 }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          python -I packaging/signing/release_draft.py download --release "$RELEASE_ID" \
+            --name "wardr-$WARDR_VERSION-py3-none-any.whl" --sha256 "$WARDR_WHEEL_SHA256" \
+            --out "sealed/wardr-$WARDR_VERSION-py3-none-any.whl"
+      - name: Check out Wardr at the requested source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.request.outputs.commit }}
+          path: wardr-source
+          persist-credentials: false
+      - name: Build the native installer from the sealed wheel
+        shell: bash
+        env:
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          WARDR_COMMIT: ${{ steps.request.outputs.commit }}
+          WARDR_WHEEL_SHA256: ${{ steps.request.outputs.wheel_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(git -C wardr-source rev-parse HEAD)" = "$WARDR_COMMIT"
+          python -m pip install 'cryptography==50.0.2'
+          python wardr-source/packaging/build_payload.py --version "$WARDR_VERSION" \
+            --wheel "sealed/wardr-$WARDR_VERSION-py3-none-any.whl" --wheel-sha256 "$WARDR_WHEEL_SHA256" \
+            --output native-payload
+          python wardr-source/packaging/linux/build.py --payload native-payload \
+            --arch "$WARDR_ARCH" --output native-dist
+      - name: Install offline and verify the in-app upgrade and restart
+        shell: bash
+        env:
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+        run: |
+          set -euo pipefail
+          installer="$PWD/native-dist/wardr-$WARDR_VERSION-linux-$WARDR_ARCH.run"
+          wheel="native-payload/wheelhouse/wardr-$WARDR_VERSION-py3-none-any.whl"
+          data_dir=$(mktemp -d "$RUNNER_TEMP/wardr-linux-smoke.XXXXXXXX")
+          sudo -n unshare --net -- runuser -u "$(id -un)" -- \
+            env "XDG_DATA_HOME=$data_dir" sh "$installer" --no-desktop
+          python_path="$data_dir/wardr/venv/bin/python"
+          "$python_path" -I -c 'import sys; from wardr.updater import current_version, installation_problem; assert current_version() == sys.argv[1]; assert installation_problem() is None' "$WARDR_VERSION"
+          python wardr-source/tests/smoke_update.py --installed-python "$python_path" "$wheel"
+          sha256sum -- "$installer" >> "$GITHUB_STEP_SUMMARY"
+      - name: Put the verified installer on the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          name="wardr-$WARDR_VERSION-linux-$WARDR_ARCH.run"
+          python -I packaging/signing/release_draft.py upload --release "$RELEASE_ID" --name "$name" \
+            --path "native-dist/$name" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,450 @@
+name: Wardr release installers (macOS)
+
+# Builds, signs, notarizes and verifies the macOS disk images for a release, entirely
+# in this repository (packaging/signing/README.md). Only a sign-vX.Y.Z tag on main
+# starts it; pull requests never do.
+#
+#   guard    reads the signing request and finds the draft release vX.Y.Z.
+#   prepare  stages the offline payload from Wardr's own source and the sealed wheel.
+#            No environment, no secret.
+#   sign     runs in the `release` environment, which holds the Apple secrets and which
+#            the owner approves. It builds Wardr.app from the staged payload, signs it
+#            with the Developer ID, notarizes and staples it.
+#   verify   checks Gatekeeper, the ticket and the native updater on a clean runner
+#            without credentials, then gives each disk image its final name.
+#
+# Files move between jobs through the draft release, never as Actions artifacts,
+# which anyone could download from this public repository.
+
+on:
+  push:
+    tags:
+      - 'sign-v*.*.*'
+
+permissions: {}
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_TEAM: 9M6C299C9U
+  EXPECTED_IDENTITY: 'Developer ID Application: BY LUMINARY ANALYTICS (9M6C299C9U)'
+  DEVELOPER_ID_REQUIREMENT: 'anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "9M6C299C9U"'
+
+jobs:
+  guard:
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write   # read the draft release
+    outputs:
+      signing_commit: ${{ steps.request.outputs.signing_commit }}
+      version: ${{ steps.request.outputs.version }}
+      commit: ${{ steps.request.outputs.commit }}
+      wheel_sha256: ${{ steps.request.outputs.wheel_sha256 }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Read the signing request on a tag on main
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          tagged="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          test "$tagged" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$tagged" refs/remotes/origin/main
+          python -I packaging/signing/read_request.py "$GITHUB_REF" > request.out
+          cat request.out >> "$GITHUB_OUTPUT"
+          commit="$(sed -n 's/^commit=//p' request.out)"
+          git merge-base --is-ancestor "$commit" "$tagged"
+          printf 'signing_commit=%s\n' "$tagged" >> "$GITHUB_OUTPUT"
+      - name: Find the draft release
+        id: draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+        run: python -I packaging/signing/release_draft.py find --tag "v$WARDR_VERSION" >> "$GITHUB_OUTPUT"
+
+  prepare:
+    needs: guard
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    outputs:
+      payload_arm64_id: ${{ matrix.arch == 'arm64' && steps.payload.outputs.asset_id || '' }}
+      payload_arm64_sha: ${{ matrix.arch == 'arm64' && steps.payload.outputs.sha256 || '' }}
+      payload_x64_id: ${{ matrix.arch == 'x64' && steps.payload.outputs.asset_id || '' }}
+      payload_x64_sha: ${{ matrix.arch == 'x64' && steps.payload.outputs.sha256 || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, arch: arm64, machine: arm64}
+          - {os: macos-15-intel, arch: x64, machine: x86_64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    permissions:
+      contents: write   # read the sealed wheel and stage the payload on the draft release
+    env:
+      WARDR_ARCH: ${{ matrix.arch }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+      WARDR_VERSION: ${{ needs.guard.outputs.version }}
+      WARDR_COMMIT: ${{ needs.guard.outputs.commit }}
+      WARDR_WHEEL_SHA: ${{ needs.guard.outputs.wheel_sha256 }}
+      RELEASE_ID: ${{ needs.guard.outputs.release_id }}
+    steps:
+      - name: Check out the signing tools from the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.signing_commit }}
+          sparse-checkout: packaging/signing
+          path: signing
+          persist-credentials: false
+      - name: Check out the requested Wardr source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.WARDR_COMMIT }}
+          path: wardr-source
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Download the sealed wheel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -I signing/packaging/signing/release_draft.py download --release "$RELEASE_ID" \
+            --name "wardr-$WARDR_VERSION-py3-none-any.whl" --sha256 "$WARDR_WHEEL_SHA" \
+            --out "$RUNNER_TEMP/sealed/wardr-$WARDR_VERSION-py3-none-any.whl"
+      - name: Stage the exact requested wheel with native offline dependencies
+        shell: bash
+        working-directory: wardr-source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WARDR_COMMIT"
+          test "$(uname -m)" = "$EXPECTED_MACHINE"
+          wheel="$RUNNER_TEMP/sealed/wardr-$WARDR_VERSION-py3-none-any.whl"
+          printf '%s  %s\n' "$WARDR_WHEEL_SHA" "$wheel" | shasum -a 256 -c
+          python -m pip install --disable-pip-version-check cryptography==50.0.2
+          payload="$RUNNER_TEMP/wardr-payload"
+          python packaging/build_payload.py --version "$WARDR_VERSION" --wheel "$wheel" \
+            --wheel-sha256 "$WARDR_WHEEL_SHA" --output "$payload"
+          prepared="$payload/wheelhouse/wardr-$WARDR_VERSION-py3-none-any.whl"
+          printf '%s  %s\n' "$WARDR_WHEEL_SHA" "$prepared" | shasum -a 256 -c
+          test "$(lipo -archs "$payload/python/bin/python3")" = "$EXPECTED_MACHINE"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/wardr-payload-$WARDR_ARCH.tar.gz" wardr-payload
+      - name: Stage the payload on the draft release
+        id: payload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python -I signing/packaging/signing/release_draft.py upload --release "$RELEASE_ID" \
+            --name "staging-macos-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-payload-$WARDR_ARCH.tar.gz" \
+            --path "$RUNNER_TEMP/wardr-payload-$WARDR_ARCH.tar.gz" | tee -a "$GITHUB_OUTPUT"
+
+  sign:
+    needs: [guard, prepare]
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    outputs:
+      candidate_arm64_id: ${{ matrix.arch == 'arm64' && steps.candidate.outputs.asset_id || '' }}
+      candidate_arm64_sha: ${{ matrix.arch == 'arm64' && steps.candidate.outputs.sha256 || '' }}
+      candidate_x64_id: ${{ matrix.arch == 'x64' && steps.candidate.outputs.asset_id || '' }}
+      candidate_x64_sha: ${{ matrix.arch == 'x64' && steps.candidate.outputs.sha256 || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, arch: arm64, machine: arm64}
+          - {os: macos-15-intel, arch: x64, machine: x86_64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 80
+    environment: release
+    permissions:
+      contents: write   # fetch the staged payload and stage the signed disk image on the draft release
+    env:
+      WARDR_ARCH: ${{ matrix.arch }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+      WARDR_VERSION: ${{ needs.guard.outputs.version }}
+      WARDR_COMMIT: ${{ needs.guard.outputs.commit }}
+      WARDR_WHEEL_SHA: ${{ needs.guard.outputs.wheel_sha256 }}
+      RELEASE_ID: ${{ needs.guard.outputs.release_id }}
+      PAYLOAD_ID: ${{ needs.prepare.outputs[format('payload_{0}_id', matrix.arch)] }}
+      PAYLOAD_SHA: ${{ needs.prepare.outputs[format('payload_{0}_sha', matrix.arch)] }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.WARDR_COMMIT }}
+          persist-credentials: false
+      - name: Check out the signing tools from the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.signing_commit }}
+          sparse-checkout: packaging/signing
+          path: .signing
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Fetch and validate the staged payload before using credentials
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$PAYLOAD_ID" =~ ^[1-9][0-9]*$ && "$PAYLOAD_SHA" =~ ^[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$WARDR_COMMIT"
+          test "$(uname -m)" = "$EXPECTED_MACHINE"
+          input="$RUNNER_TEMP/wardr-input"
+          archive="$input/wardr-payload-$WARDR_ARCH.tar.gz"
+          python -I .signing/packaging/signing/release_draft.py fetch --release "$RELEASE_ID" \
+            --asset "$PAYLOAD_ID" --sha256 "$PAYLOAD_SHA" --out "$archive"
+          printf '%s  %s\n' "$PAYLOAD_SHA" "$archive" | shasum -a 256 -c
+          tar -C "$input" -xzf "$archive"
+          payload="$input/wardr-payload"
+          wheel="$payload/wheelhouse/wardr-$WARDR_VERSION-py3-none-any.whl"
+          printf '%s  %s\n' "$WARDR_WHEEL_SHA" "$wheel" | shasum -a 256 -c
+          test "$(lipo -archs "$payload/python/bin/python3")" = "$EXPECTED_MACHINE"
+          cmp packaging/install.py "$payload/install.py"
+          /usr/bin/python3 -I - "$wheel" <<'PY'
+          from pathlib import Path
+          import sys
+          from zipfile import ZipFile
+
+          name = "wardr/keys/release.pem"
+          with ZipFile(sys.argv[1]) as wheel:
+              if wheel.read(name) != Path(name).read_bytes():
+                  raise SystemExit("The sealed wheel's release key differs from the pinned Wardr source.")
+          PY
+      - name: Build, sign and notarize Wardr only
+        id: sign
+        shell: bash
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_SIGN_P12_BASE64: ${{ secrets.MACOS_SIGN_P12_BASE64 }}
+          MACOS_SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${MACOS_SIGN_IDENTITY:?Missing MACOS_SIGN_IDENTITY}"
+          : "${MACOS_SIGN_P12_BASE64:?Missing MACOS_SIGN_P12_BASE64}"
+          : "${MACOS_SIGN_P12_PASSWORD:?Missing MACOS_SIGN_P12_PASSWORD}"
+          : "${APPLE_API_KEY_BASE64:?Missing APPLE_API_KEY_BASE64}"
+          : "${APPLE_API_KEY_ID:?Missing APPLE_API_KEY_ID}"
+          : "${APPLE_API_ISSUER_ID:?Missing APPLE_API_ISSUER_ID}"
+
+          work=$(mktemp -d "$RUNNER_TEMP/wardr-sign.XXXXXXXXXX")
+          keychain="$work/wardr-signing.keychain-db"
+          mount="$work/mount"
+          mounted=no
+          old_keychains=()
+          while IFS= read -r line; do
+            line=${line#*\"}
+            line=${line%\"}
+            [[ -z "$line" ]] || old_keychains+=("$line")
+          done < <(security list-keychains -d user)
+          cleanup() {
+            [[ "$mounted" = no ]] || hdiutil detach -quiet "$mount" || true
+            security list-keychains -d user -s "${old_keychains[@]}" 2>/dev/null || true
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$work"
+          }
+          trap cleanup EXIT
+          trap 'exit 1' HUP INT TERM
+
+          password=$(uuidgen)
+          printf '%s' "$MACOS_SIGN_P12_BASE64" | base64 --decode > "$work/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 4800 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$work/signing.p12" -k "$keychain" -P "$MACOS_SIGN_P12_PASSWORD" -T /usr/bin/codesign >/dev/null
+          rm -f "$work/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" "${old_keychains[@]}"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk \
+            -v authority="$EXPECTED_IDENTITY" -v configured="$MACOS_SIGN_IDENTITY" \
+            'index($0, "\"" authority "\"") && (index(authority, configured) || toupper(configured) == toupper($2)) { print $2 }')
+          [[ "$identity" =~ ^[0-9A-Fa-f]{40}$ ]]
+
+          profile=wardr-notary
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$work/AuthKey.p8"
+          xcrun notarytool store-credentials "$profile" --keychain "$keychain" \
+            --key "$work/AuthKey.p8" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" >/dev/null
+          rm -f "$work/AuthKey.p8"
+          unset MACOS_SIGN_IDENTITY MACOS_SIGN_P12_BASE64 MACOS_SIGN_P12_PASSWORD \
+            APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID password
+
+          notary=(--keychain "$keychain" --keychain-profile "$profile")
+          notarize() {
+            local archive=$1 target=$2 result="$work/notary.plist" id status
+            xcrun notarytool submit "$archive" "${notary[@]}" --no-wait --no-progress --output-format plist > "$result"
+            id=$(plutil -extract id raw -o - "$result")
+            echo "Submitted $(basename "$archive") for notarization as $id."
+            xcrun notarytool wait "$id" "${notary[@]}" --timeout 30m --no-progress --output-format plist > "$result"
+            status=$(plutil -extract status raw -o - "$result")
+            if [[ "$status" != Accepted ]]; then
+              xcrun notarytool log "$id" "${notary[@]}" >&2 || true
+              echo "Notarization failed with status $status." >&2
+              return 1
+            fi
+            xcrun stapler staple "$target"
+            xcrun stapler validate "$target"
+          }
+
+          payload="$RUNNER_TEMP/wardr-input/wardr-payload"
+          name="wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+          WARDR_MACOS_SIGNING_IDENTITY="$identity" WARDR_MACOS_NOTARY_PROFILE= \
+            sh packaging/macos/build.sh "$payload" "$WARDR_VERSION" "$work/initial"
+          initial="$work/initial/$name"
+          codesign --verify --strict -R="$DEVELOPER_ID_REQUIREMENT" "$initial"
+          mkdir -p "$mount" "$work/volume" "$RUNNER_TEMP/wardr-candidate"
+          hdiutil attach "$initial" -quiet -nobrowse -readonly -mountpoint "$mount"
+          mounted=yes
+          app="$work/volume/Wardr.app"
+          ditto "$mount/Wardr.app" "$app"
+          hdiutil detach -quiet "$mount"
+          mounted=no
+          codesign --verify --deep --strict -R="$DEVELOPER_ID_REQUIREMENT" "$app"
+
+          # Staple the app before making the final DMG so the copy users drag out carries its ticket.
+          ditto -c -k --keepParent "$app" "$work/Wardr-notary.zip"
+          notarize "$work/Wardr-notary.zip" "$app"
+          codesign --verify --deep --strict -R="$DEVELOPER_ID_REQUIREMENT" "$app"
+          ln -s /Applications "$work/volume/Applications"
+          image="$work/$name"
+          hdiutil create -quiet -volname Wardr -srcfolder "$work/volume" -format UDZO "$image"
+          codesign --sign "$identity" --timestamp --identifier com.luminaryanalytics.wardr.disk-image "$image"
+          notarize "$image" "$image"
+          codesign --verify --strict -R="$DEVELOPER_ID_REQUIREMENT" "$image"
+          hdiutil verify -quiet "$image"
+          mv "$image" "$RUNNER_TEMP/wardr-candidate/$name"
+      - name: Stage the signed disk image and drop the payload
+        id: candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          helper="python -I .signing/packaging/signing/release_draft.py"
+          name="wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+          $helper upload --release "$RELEASE_ID" \
+            --name "staging-macos-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-signed-$name" \
+            --path "$RUNNER_TEMP/wardr-candidate/$name" | tee -a "$GITHUB_OUTPUT"
+          $helper delete --release "$RELEASE_ID" --asset "$PAYLOAD_ID"
+
+  verify:
+    needs: [guard, sign]
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: macos-15, arch: arm64, machine: arm64}
+          - {os: macos-15-intel, arch: x64, machine: x86_64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: write   # fetch the signed disk image and give it its final name on the draft release
+    env:
+      WARDR_ARCH: ${{ matrix.arch }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+      WARDR_VERSION: ${{ needs.guard.outputs.version }}
+      WARDR_COMMIT: ${{ needs.guard.outputs.commit }}
+      WARDR_WHEEL_SHA: ${{ needs.guard.outputs.wheel_sha256 }}
+      SIGNING_COMMIT: ${{ needs.guard.outputs.signing_commit }}
+      RELEASE_ID: ${{ needs.guard.outputs.release_id }}
+      CANDIDATE_ID: ${{ needs.sign.outputs[format('candidate_{0}_id', matrix.arch)] }}
+      CANDIDATE_SHA: ${{ needs.sign.outputs[format('candidate_{0}_sha', matrix.arch)] }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.WARDR_COMMIT }}
+          persist-credentials: false
+      - name: Check out the signing tools from the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.signing_commit }}
+          sparse-checkout: packaging/signing
+          path: .signing
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Fetch the signed disk image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_ID" =~ ^[1-9][0-9]*$ && "$CANDIDATE_SHA" =~ ^[0-9a-f]{64}$ ]]
+          python -I .signing/packaging/signing/release_draft.py fetch --release "$RELEASE_ID" \
+            --asset "$CANDIDATE_ID" --sha256 "$CANDIDATE_SHA" \
+            --out "$RUNNER_TEMP/wardr-candidate/wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+      - name: Verify the image, app and native updater in a fresh environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WARDR_COMMIT"
+          test "$(uname -m)" = "$EXPECTED_MACHINE"
+          image="$RUNNER_TEMP/wardr-candidate/wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+          printf '%s  %s\n' "$CANDIDATE_SHA" "$image" | shasum -a 256 -c
+          if ! spctl --status 2>&1 | grep -qx 'assessments enabled'; then
+            sudo -n spctl --global-enable 2>/dev/null || sudo -n spctl --master-enable
+          fi
+          spctl --status 2>&1 | grep -qx 'assessments enabled'
+          codesign --verify --strict -R="$DEVELOPER_ID_REQUIREMENT" "$image"
+          xcrun stapler validate "$image"
+          hdiutil verify -quiet "$image"
+          assessment=$(spctl --assess --type open --context context:primary-signature -vv "$image" 2>&1)
+          printf '%s\n' "$assessment" | grep -qx 'source=Notarized Developer ID'
+          mount=$(mktemp -d "$RUNNER_TEMP/wardr-volume.XXXXXXXXXX")
+          hdiutil attach "$image" -quiet -nobrowse -readonly -mountpoint "$mount"
+          trap 'hdiutil detach -quiet "$mount"' EXIT
+          app="$mount/Wardr.app"
+          codesign --verify --deep --strict -R="$DEVELOPER_ID_REQUIREMENT" "$app"
+          xcrun stapler validate "$app"
+          assessment=$(spctl --assess --type execute -vv "$app" 2>&1)
+          printf '%s\n' "$assessment" | grep -qx 'source=Notarized Developer ID'
+          signature=$(codesign --display --verbose=4 "$app" 2>&1)
+          printf '%s\n' "$signature" | grep -qx "TeamIdentifier=$EXPECTED_TEAM"
+          printf '%s\n' "$signature" | grep -E '^Timestamp=' >/dev/null
+          printf '%s\n' "$signature" | grep -E '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' >/dev/null
+          test "$(lipo -archs "$app/Contents/MacOS/Wardr")" = "$EXPECTED_MACHINE"
+          payload="$app/Contents/Resources/payload"
+          test "$(lipo -archs "$payload/python/bin/python3")" = "$EXPECTED_MACHINE"
+          wheel="$payload/wheelhouse/wardr-$WARDR_VERSION-py3-none-any.whl"
+          printf '%s  %s\n' "$WARDR_WHEEL_SHA" "$wheel" | shasum -a 256 -c
+          "$app/Contents/MacOS/Wardr" --prepare-only "$RUNNER_TEMP/Wardr Runtime Test"
+          python="$RUNNER_TEMP/Wardr Runtime Test/venv/bin/python3"
+          "$python" -I tests/smoke_update.py --installed-python "$python" "$wheel"
+          printf '%s  %s\n' "$CANDIDATE_SHA" "$image" | shasum -a 256 -c
+      - name: Give the verified disk image its final name
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python -I .signing/packaging/signing/release_draft.py rename --release "$RELEASE_ID" \
+            --asset "$CANDIDATE_ID" --name "wardr-$WARDR_VERSION-macos-$WARDR_ARCH.dmg"
+          pinned_key_sha=$(shasum -a 256 wardr/keys/release.pem | awk '{print $1}')
+          {
+            printf '## Wardr %s macOS %s\n\n' "$WARDR_VERSION" "$WARDR_ARCH"
+            printf '| Property | Value |\n| --- | --- |\n'
+            printf '| %s | \x60%s\x60 |\n' 'Signing tag' "$GITHUB_REF_NAME" \
+              'Signing commit' "$SIGNING_COMMIT" 'Wardr commit' "$WARDR_COMMIT" \
+              'Wardr wheel SHA-256' "$WARDR_WHEEL_SHA" 'Wardr public key SHA-256' "$pinned_key_sha" \
+              'Apple Developer Team' "$EXPECTED_TEAM" 'DMG SHA-256' "$CANDIDATE_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"

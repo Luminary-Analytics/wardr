@@ -1,0 +1,420 @@
+name: Wardr release installer (Windows)
+
+# Builds, signs and verifies the Windows installer for a release, entirely in this
+# repository (packaging/signing/README.md). Only a sign-vX.Y.Z tag on main starts it;
+# pull requests never do.
+#
+#   prepare  builds and smoke-tests the unsigned Setup from Wardr's own source and the
+#            sealed wheel on the draft release vX.Y.Z. No environment, no secret.
+#   sign     runs in the `release` environment, whose Azure sign-in trusts this
+#            repository's environment subject and which the owner approves. It signs
+#            only the exact unsigned Setup `prepare` recorded, with Microsoft Artifact
+#            Signing through packaging/windows/Authenticode.ps1.
+#   smoke    checks the signature and installs, updates and uninstalls on a clean
+#            runner without credentials, then gives the installer its final name.
+#
+# Files move between jobs through the draft release, never as Actions artifacts,
+# which anyone could download from this public repository.
+
+on:
+  push:
+    tags:
+      - 'sign-v*.*.*'
+
+permissions: {}
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    runs-on: windows-2025
+    timeout-minutes: 25
+    permissions:
+      contents: write   # read the draft release and stage the unsigned Setup on it
+    outputs:
+      version: ${{ steps.request.outputs.version }}
+      commit: ${{ steps.request.outputs.commit }}
+      wheel_sha256: ${{ steps.request.outputs.wheel_sha256 }}
+      release_id: ${{ steps.draft.outputs.release_id }}
+      unsigned_asset: ${{ steps.stage.outputs.asset_id }}
+      unsigned_sha256: ${{ steps.stage.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Read the signing request on a tag on main
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          tagged="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          test "$tagged" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$tagged" refs/remotes/origin/main
+          python -I packaging/signing/read_request.py "$GITHUB_REF" > request.out
+          cat request.out >> "$GITHUB_OUTPUT"
+          commit="$(sed -n 's/^commit=//p' request.out)"
+          git merge-base --is-ancestor "$commit" "$tagged"
+      - name: Find the draft release and download the sealed wheel
+        id: draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          WARDR_WHEEL_SHA256: ${{ steps.request.outputs.wheel_sha256 }}
+        run: |
+          set -euo pipefail
+          python -I packaging/signing/release_draft.py find --tag "v$WARDR_VERSION" > draft.out
+          cat draft.out >> "$GITHUB_OUTPUT"
+          release_id="$(sed -n 's/^release_id=//p' draft.out)"
+          python -I packaging/signing/release_draft.py download --release "$release_id" \
+            --name "wardr-$WARDR_VERSION-py3-none-any.whl" --sha256 "$WARDR_WHEEL_SHA256" \
+            --out "sealed/wardr-$WARDR_VERSION-py3-none-any.whl"
+      - name: Check out Wardr at the requested source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.request.outputs.commit }}
+          path: wardr-source
+          persist-credentials: false
+      - name: Build and smoke-test the unsigned installer
+        shell: pwsh
+        env:
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          WARDR_COMMIT: ${{ steps.request.outputs.commit }}
+          WARDR_WHEEL_SHA256: ${{ steps.request.outputs.wheel_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $commit = git -C wardr-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $commit -cne $env:WARDR_COMMIT) {
+            throw 'The Wardr source checkout differs from the signing request.'
+          }
+          $wheel = Join-Path $env:GITHUB_WORKSPACE "sealed\wardr-$($env:WARDR_VERSION)-py3-none-any.whl"
+          if ((Get-FileHash -LiteralPath $wheel -Algorithm SHA256).Hash -ne $env:WARDR_WHEEL_SHA256) {
+            throw 'The sealed Wardr wheel differs from the signing request.'
+          }
+          python -m pip install 'cryptography==50.0.2'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the Wardr payload builder.' }
+          python wardr-source/packaging/build_payload.py --version $env:WARDR_VERSION `
+              --wheel $wheel --wheel-sha256 $env:WARDR_WHEEL_SHA256 --output wardr-payload
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to verify and stage the Wardr payload.' }
+          $tool = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $inno = Join-Path $env:RUNNER_TEMP 'inno-compiler'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $tool
+          if ((Get-FileHash -LiteralPath $tool -Algorithm SHA256).Hash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') {
+            throw 'Inno Setup installer checksum mismatch.'
+          }
+          $compilerInstall = Start-Process -FilePath $tool -Wait -PassThru -ArgumentList `
+              "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$inno`""
+          if ($compilerInstall.ExitCode -ne 0) { throw "Inno Setup install exited $($compilerInstall.ExitCode)." }
+          $payload = (Resolve-Path 'wardr-payload').Path
+          $output = (New-Item -ItemType Directory -Path 'unsigned-setup').FullName
+          & (Join-Path $inno 'ISCC.exe') "/DWardrVersion=$env:WARDR_VERSION" "/DWardrPayload=$payload" `
+              '/DWardrArch=x64' "/O$output" wardr-source/packaging/windows/wardr.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup exited $LASTEXITCODE." }
+          $setup = Join-Path $output "wardr-$($env:WARDR_VERSION)-windows-x64-setup.exe"
+          $location = Join-Path $env:RUNNER_TEMP ('Wardr Unsigned Setup ' + [guid]::NewGuid())
+          $log = Join-Path $env:RUNNER_TEMP 'wardr-unsigned-setup.log'
+          $install = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList `
+              "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$location`" /LOG=`"$log`""
+          if ($install.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 75 }
+            throw "Unsigned Wardr Setup exited $($install.ExitCode)."
+          }
+          & (Join-Path $location 'venv\Scripts\python.exe') -I -c 'import sys; from wardr.updater import current_version, installation_problem; assert current_version() == sys.argv[1]; assert installation_problem() is None' $env:WARDR_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'The unsigned setup did not install the requested updatable Wardr version.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $setup).Status -ne 'NotSigned') {
+            throw 'The signing input must be an unsigned Wardr installer.'
+          }
+      - name: Stage the unsigned installer on the draft release
+        id: stage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARDR_VERSION: ${{ steps.request.outputs.version }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          name="wardr-$WARDR_VERSION-windows-x64-setup.exe"
+          python -I packaging/signing/release_draft.py upload --release "$RELEASE_ID" \
+            --name "staging-windows-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-unsigned-$name" \
+            --path "unsigned-setup/$name" | tee -a "$GITHUB_OUTPUT"
+
+  sign:
+    needs: prepare
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    runs-on: windows-2025
+    environment: release
+    timeout-minutes: 20
+    permissions:
+      contents: write   # fetch the staged Setup and stage the signed one on the draft release
+      id-token: write   # the Azure sign-in for Artifact Signing (OIDC); nothing else
+    outputs:
+      signed_asset: ${{ steps.stage.outputs.signed_asset_id }}
+      signed_sha256: ${{ steps.stage.outputs.signed_sha256 }}
+      proof_asset: ${{ steps.stage.outputs.proof_asset_id }}
+      proof_sha256: ${{ steps.stage.outputs.proof_sha256 }}
+    env:
+      WARDR_INSTALLER: wardr-${{ needs.prepare.outputs.version }}-windows-x64-setup.exe
+      WARDR_VERSION: ${{ needs.prepare.outputs.version }}
+      WARDR_COMMIT: ${{ needs.prepare.outputs.commit }}
+      WARDR_WHEEL_SHA256: ${{ needs.prepare.outputs.wheel_sha256 }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      UNSIGNED_ASSET: ${{ needs.prepare.outputs.unsigned_asset }}
+      UNSIGNED_SHA256: ${{ needs.prepare.outputs.unsigned_sha256 }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+      WINDOWS_SIGN_EXPECTED_SUBJECT: ${{ vars.WINDOWS_SIGN_EXPECTED_SUBJECT }}
+    steps:
+      - name: Require the signing profile configuration
+        shell: pwsh
+        run: |
+          $required = @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'ARTIFACT_SIGNING_ENDPOINT',
+              'ARTIFACT_SIGNING_ACCOUNT', 'ARTIFACT_SIGNING_PROFILE', 'WINDOWS_SIGN_EXPECTED_SUBJECT')
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing.Count) { throw "Missing signing environment variables: $($missing -join ', ')." }
+          foreach ($name in 'AZURE_CLIENT_ID', 'AZURE_TENANT_ID') {
+            if ([Environment]::GetEnvironmentVariable($name) -notmatch '\A[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\z') {
+              throw "$name must contain the configured Microsoft Entra identifier."
+            }
+          }
+          if ($env:ARTIFACT_SIGNING_ENDPOINT -notmatch '\Ahttps://[a-z0-9]+\.codesigning\.azure\.net/?\z') {
+            throw 'ARTIFACT_SIGNING_ENDPOINT must be a Microsoft Artifact Signing regional endpoint.'
+          }
+          if ($env:UNSIGNED_ASSET -notmatch '\A[1-9][0-9]*\z' -or $env:UNSIGNED_SHA256 -notmatch '\A[0-9a-f]{64}\z') {
+            throw 'The preparation job did not record the staged installer.'
+          }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Fetch the staged installer before signing in to Azure
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -I packaging/signing/release_draft.py fetch --release $env:RELEASE_ID --asset $env:UNSIGNED_ASSET `
+              --sha256 $env:UNSIGNED_SHA256 --out "signing-input\$env:WARDR_INSTALLER"
+          if ($LASTEXITCODE -ne 0) { throw 'The staged installer did not download as recorded.' }
+          if ((Get-AuthenticodeSignature -LiteralPath "signing-input\$env:WARDR_INSTALLER").Status -ne 'NotSigned') {
+            throw 'The signing input must be the original unsigned installer.'
+          }
+      - name: Fetch Microsoft's Artifact Signing client (pinned)
+        id: client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $version = '1.0.128'
+          $sha256 = '74bd7d27e6ce1051409c38d9b46bc8df0400ecd643d51ffbf2ac00869061e40b'
+          $name = "microsoft.artifactsigning.client.$version.nupkg"
+          $work = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          $package = Join-Path $work $name
+          Invoke-WebRequest -UseBasicParsing -OutFile $package `
+              -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/$version/$name"
+          if ((Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) {
+            throw 'Microsoft.ArtifactSigning.Client checksum mismatch; nothing was extracted.'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($package)
+          try {
+            $entry = $zip.Entries | Where-Object { $_.FullName -eq 'bin/x64/Azure.CodeSigning.Dlib.dll' }
+            if (@($entry).Count -ne 1) { throw 'The Artifact Signing client has no x64 dlib.' }
+            $bin = Join-Path $work 'bin\x64'
+            New-Item -ItemType Directory -Path $bin | Out-Null
+            foreach ($file in $zip.Entries | Where-Object { $_.FullName -like 'bin/x64/*' -and $_.Name }) {
+              [IO.Compression.ZipFileExtensions]::ExtractToFile($file, (Join-Path $bin $file.Name))
+            }
+          } finally { $zip.Dispose() }
+          $metadata = Join-Path $work 'metadata.json'
+          [ordered]@{
+            Endpoint = $env:ARTIFACT_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:ARTIFACT_SIGNING_ACCOUNT
+            CertificateProfileName = $env:ARTIFACT_SIGNING_PROFILE
+          } | ConvertTo-Json | Set-Content -LiteralPath $metadata -Encoding utf8
+          $sdk = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $signTool = Get-ChildItem -LiteralPath $sdk -Directory |
+              Where-Object { $_.Name -match '\A[0-9]+(\.[0-9]+){3}\z' } |
+              Sort-Object { [version]$_.Name } -Descending |
+              ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+              Select-Object -First 1
+          if (-not $signTool) { throw 'The Windows SDK SignTool is required.' }
+          "dlib=$(Join-Path $bin 'Azure.CodeSigning.Dlib.dll')" >> $env:GITHUB_OUTPUT
+          "metadata=$metadata" >> $env:GITHUB_OUTPUT
+          "signtool=$signTool" >> $env:GITHUB_OUTPUT
+      - name: Sign in to Azure with GitHub's OIDC token
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Sign only the staged Windows Setup and verify it
+        shell: pwsh
+        env:
+          SIGNTOOL: ${{ steps.client.outputs.signtool }}
+          DLIB: ${{ steps.client.outputs.dlib }}
+          METADATA: ${{ steps.client.outputs.metadata }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path 'signing-output' | Out-Null
+          $result = ./packaging/windows/Authenticode.ps1 -Installer "signing-input\$env:WARDR_INSTALLER" `
+              -ExpectedSha256 $env:UNSIGNED_SHA256 -ExpectedPublisherSubject $env:WINDOWS_SIGN_EXPECTED_SUBJECT `
+              -SignToolPath $env:SIGNTOOL -AzureDlibPath $env:DLIB -AzureMetadataPath $env:METADATA `
+              -OutputDirectory 'signing-output' -Json | ConvertFrom-Json
+          $signed = Join-Path 'signing-output' $env:WARDR_INSTALLER
+          $proof = [pscustomobject]@{
+            File = $env:WARDR_INSTALLER
+            Version = $env:WARDR_VERSION
+            Commit = $env:WARDR_COMMIT
+            WheelSha256 = $env:WARDR_WHEEL_SHA256
+            Sha256 = (Get-FileHash -LiteralPath $signed -Algorithm SHA256).Hash.ToLowerInvariant()
+            PublisherSubject = $result.PublisherSubject
+            PublisherThumbprint = $result.PublisherThumbprint
+            TimestampSubject = $result.TimestampSubject
+          }
+          if ($proof.Sha256 -ne $result.Sha256 -or $proof.PublisherSubject -cne $env:WINDOWS_SIGN_EXPECTED_SUBJECT) {
+            throw 'The signed installer differs from the one the signing script verified.'
+          }
+          $proof | ConvertTo-Json | Set-Content -LiteralPath 'signing-output\authenticode.json' -Encoding utf8
+      - name: Stage the signed installer and its proof, and drop the unsigned one
+        id: stage
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prefix="staging-windows-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          helper="python -I packaging/signing/release_draft.py"
+          $helper upload --release "$RELEASE_ID" --name "$prefix-signed-$WARDR_INSTALLER" \
+            --path "signing-output/$WARDR_INSTALLER" | sed 's/^/signed_/' >> "$GITHUB_OUTPUT"
+          $helper upload --release "$RELEASE_ID" --name "$prefix-authenticode.json" \
+            --path signing-output/authenticode.json | sed 's/^/proof_/' >> "$GITHUB_OUTPUT"
+          $helper delete --release "$RELEASE_ID" --asset "$UNSIGNED_ASSET"
+
+  smoke:
+    needs: [prepare, sign]
+    if: github.repository == 'Luminary-Analytics/wardr' && startsWith(github.ref, 'refs/tags/sign-v')
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: write   # fetch the signed Setup and give it its final name on the draft release
+    env:
+      WARDR_INSTALLER: wardr-${{ needs.prepare.outputs.version }}-windows-x64-setup.exe
+      WARDR_VERSION: ${{ needs.prepare.outputs.version }}
+      WARDR_COMMIT: ${{ needs.prepare.outputs.commit }}
+      WARDR_WHEEL_SHA256: ${{ needs.prepare.outputs.wheel_sha256 }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      SIGNED_ASSET: ${{ needs.sign.outputs.signed_asset }}
+      SIGNED_SHA256: ${{ needs.sign.outputs.signed_sha256 }}
+      PROOF_ASSET: ${{ needs.sign.outputs.proof_asset }}
+      PROOF_SHA256: ${{ needs.sign.outputs.proof_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Check out the requested Wardr updater smoke test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          path: wardr-source
+          persist-credentials: false
+      - name: Fetch the signed installer, its proof and the sealed wheel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          helper="python -I packaging/signing/release_draft.py"
+          $helper fetch --release "$RELEASE_ID" --asset "$SIGNED_ASSET" --sha256 "$SIGNED_SHA256" \
+            --out "signed-setup/$WARDR_INSTALLER"
+          $helper fetch --release "$RELEASE_ID" --asset "$PROOF_ASSET" --sha256 "$PROOF_SHA256" \
+            --out signed-setup/authenticode.json
+          $helper download --release "$RELEASE_ID" --name "wardr-$WARDR_VERSION-py3-none-any.whl" \
+            --sha256 "$WARDR_WHEEL_SHA256" --out "sealed/wardr-$WARDR_VERSION-py3-none-any.whl"
+      - name: Verify and smoke-test on a Windows runner without Azure credentials
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signedSetup = Join-Path (Resolve-Path 'signed-setup').Path $env:WARDR_INSTALLER
+          $proof = Get-Content -LiteralPath 'signed-setup\authenticode.json' -Raw | ConvertFrom-Json
+          if ($proof.File -cne $env:WARDR_INSTALLER -or $proof.Version -cne $env:WARDR_VERSION -or
+              $proof.Commit -cne $env:WARDR_COMMIT -or $proof.WheelSha256 -cne $env:WARDR_WHEEL_SHA256 -or
+              $proof.Sha256 -ne $env:SIGNED_SHA256 -or
+              (Get-FileHash -LiteralPath $signedSetup -Algorithm SHA256).Hash -ne $env:SIGNED_SHA256) {
+            throw 'The signed installer differs from the file verified by the signing job.'
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $signedSetup
+          if ($signature.Status -ne 'Valid' -or $signature.SignatureType -ne 'Authenticode' -or
+              $signature.SignerCertificate.Subject -cne $proof.PublisherSubject -or
+              $signature.SignerCertificate.Thumbprint -ne $proof.PublisherThumbprint -or
+              $null -eq $signature.TimeStamperCertificate) {
+            throw 'The clean runner could not confirm the installer signature and timestamp.'
+          }
+
+          $location = Join-Path $env:RUNNER_TEMP ('Wardr Signed Setup ' + [guid]::NewGuid())
+          $installLog = Join-Path $env:RUNNER_TEMP 'wardr-signed-setup.log'
+          $install = Start-Process -FilePath $signedSetup -Wait -PassThru -ArgumentList `
+              "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$location`" /LOG=`"$installLog`""
+          if ($install.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $installLog) { Get-Content -LiteralPath $installLog -Tail 75 }
+            throw "Signed Wardr Setup exited $($install.ExitCode)."
+          }
+          $python = Join-Path $location 'venv\Scripts\python.exe'
+          & $python -I -c 'import sys; from wardr.updater import current_version, installation_problem; assert current_version() == sys.argv[1]; assert installation_problem() is None' $env:WARDR_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'The signed setup did not install the requested updatable Wardr version.' }
+          $commit = git -C wardr-source rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $commit -cne $env:WARDR_COMMIT) {
+            throw 'The updater smoke test checkout differs from the signing request.'
+          }
+          $wheel = Join-Path $env:GITHUB_WORKSPACE "sealed\wardr-$($env:WARDR_VERSION)-py3-none-any.whl"
+          & $python -I wardr-source/tests/smoke_update.py --installed-python $python $wheel
+          if ($LASTEXITCODE -ne 0) { throw 'The signed installation failed the in-app upgrade and restart smoke test.' }
+
+          $userFile = Join-Path $location 'retained-report.txt'
+          Set-Content -LiteralPath $userFile -Value 'Wardr local report fixture' -Encoding utf8
+          $uninstaller = Join-Path $location 'unins000.exe'
+          $uninstallLog = Join-Path $env:RUNNER_TEMP 'wardr-signed-uninstall.log'
+          $uninstall = Start-Process -FilePath $uninstaller -Wait -PassThru -ArgumentList `
+              "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=`"$uninstallLog`""
+          if ($uninstall.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $uninstallLog) { Get-Content -LiteralPath $uninstallLog -Tail 75 }
+            throw "Wardr uninstaller exited $($uninstall.ExitCode)."
+          }
+          foreach ($owned in 'venv', 'python', '.wardr-native-install', '.wardr-native-install.lock') {
+            if (Test-Path -LiteralPath (Join-Path $location $owned)) { throw "Uninstall left $owned behind." }
+          }
+          if ((Get-Content -LiteralPath $userFile) -cne 'Wardr local report fixture') {
+            throw 'Uninstall changed the retained file outside the application runtime.'
+          }
+          if ((Get-FileHash -LiteralPath $signedSetup -Algorithm SHA256).Hash -ne $env:SIGNED_SHA256) {
+            throw 'The installer changed during the installation checks.'
+          }
+          "Verified setup SHA-256: $($proof.Sha256)" >> $env:GITHUB_STEP_SUMMARY
+          'Fresh install, in-app update and restart, uninstall, and retained report checks passed.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Give the verified installer and its proof their final names
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          helper="python -I packaging/signing/release_draft.py"
+          $helper rename --release "$RELEASE_ID" --asset "$SIGNED_ASSET" --name "$WARDR_INSTALLER"
+          $helper rename --release "$RELEASE_ID" --asset "$PROOF_ASSET" \
+            --name "wardr-$WARDR_VERSION-windows-x64-authenticode.json"
