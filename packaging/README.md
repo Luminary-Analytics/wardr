@@ -38,7 +38,7 @@ to the public repository's `main` branch. Wait for the required builds and
 tests to pass, then run this from the Wardr software checkout.
 
 ```sh
-python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
+python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-key ~/.config/wardr-release/community-ed25519.pem
 ```
 
 Use `--plan` for a read-only preview. Run the same command again to resume a
@@ -47,12 +47,13 @@ release artifacts and progress in `dist/release/X.Y.Z`.
 
 The runner seals the wheel and source archive and verifies the in-place
 upgrade from the current signed wheel to the candidate, including the state
-saved across restart. It stages the request and sealed wheel on the existing
-private signing repository's `main` branch and a release tag. Windows,
-macOS, and Linux CI build and test the installers. Windows CI signs Setup,
-and macOS CI signs, notarizes, and staples the disk images. The Wardr release
-key stays local. Platform signing credentials stay in the protected private
-release environment.
+saved across restart. It puts the sealed wheel on the draft GitHub release,
+commits the signing request to `main` and pushes a `sign-vX.Y.Z` tag. This
+repository's Windows, macOS, and Linux release workflows build and test the
+installers. Windows signs Setup, and macOS signs, notarizes, and staples the
+disk images, in this repository's protected `release` environment, which the
+owner approves. The Wardr release key stays local.
+[Release signing](signing/README.md)
 
 The runner uploads and verifies the artifacts on a GitHub draft, stages and
 validates the site with the signed release and installer catalogs, promotes

@@ -6,27 +6,25 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
-import stat
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from time import monotonic, sleep
 from urllib.parse import urlencode
-from zipfile import BadZipFile, ZipFile
 
 
 PUBLIC_REPO = "Luminary-Analytics/wardr"
-SIGNING_REPO = "Luminary-Analytics/resonant-client"
 CHECKS = {"checks.yml": "Wardr checks", "update-smoke.yml": "Wardr update smoke"}
-SIGNING_WORKFLOWS = ("wardr-windows-sign.yml", "wardr-macos-sign.yml", "wardr-linux-build.yml")
+# The installer workflows in this repository that a sign-vX.Y.Z tag starts (packaging/signing/README.md).
+SIGNING_WORKFLOWS = ("release-windows.yml", "release-macos.yml", "release-linux.yml")
+SIGNING_TAG_PREFIX = "sign-v"
+STAGING_PREFIX = "staging-"
 LIVE_RELEASE_WORKFLOW = "live-release.yml"
 _VERSION = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _INSTALLER_LIMIT = 150 * 1024 * 1024
 _PROOF_LIMIT = 64 * 1024
-_ARCHIVE_LIMIT = _INSTALLER_LIMIT + 1024 * 1024
 _POLL_INTERVAL = 10
 _LIVE_VISIBILITY_GRACE = 30
 _RETRIABLE_CONCLUSIONS = {"failure", "startup_failure", "timed_out"}
@@ -174,14 +172,18 @@ def wait_checks(commit, timeout):
     _wait_runs(PUBLIC_REPO, CHECKS, _commit(commit), None, timeout, False)
 
 
+def signing_tag(version):
+    """The tag that starts the installer workflows for a version."""
+    return f"{SIGNING_TAG_PREFIX}{_version(version)}"
+
+
 def wait_signing(tag, request_commit, timeout, retry_failed=False):
-    """Return reviewed successful workflow run IDs for the private signing tag."""
-    prefix = "vwardrsign-"
-    if not isinstance(tag, str) or not tag.startswith(prefix) or "." in tag:
-        raise ReleaseError("Use the versioned private Wardr signing tag.")
-    _version(tag[len(prefix):].replace("_", "."))
+    """Return reviewed successful installer workflow run IDs for the signing tag."""
+    if not isinstance(tag, str) or not tag.startswith(SIGNING_TAG_PREFIX):
+        raise ReleaseError("Use the versioned Wardr signing tag sign-vX.Y.Z.")
+    _version(tag[len(SIGNING_TAG_PREFIX):])
     return _wait_runs(
-        SIGNING_REPO, dict.fromkeys(SIGNING_WORKFLOWS), _commit(request_commit), tag, timeout, retry_failed,
+        PUBLIC_REPO, dict.fromkeys(SIGNING_WORKFLOWS), _commit(request_commit), tag, timeout, retry_failed,
     )
 
 
@@ -290,100 +292,79 @@ def _fingerprint(path):
     return size, f"sha256:{digest}"
 
 
-def _installer_groups(version):
+def proof_asset(version):
+    """The Windows signing proof the installer workflow leaves on the draft; it's kept locally, never published."""
+    return f"wardr-{_version(version)}-windows-x64-authenticode.json"
+
+
+def _installer_assets(version):
+    """The verified files the installer workflows leave on the draft release, by asset name and local name."""
     prefix = f"wardr-{version}"
     return {
-        "wardr-windows-sign.yml": {
-            f"{prefix}-windows-x64-authenticode-verified": (f"{prefix}-windows-x64-setup.exe", "authenticode.json"),
-        },
-        "wardr-macos-sign.yml": {
-            f"{prefix}-macos-{arch}-verified": (f"{prefix}-macos-{arch}.dmg",) for arch in ("arm64", "x64")
-        },
-        "wardr-linux-build.yml": {
-            f"{prefix}-linux-{arch}-verified": (f"{prefix}-linux-{arch}.run",) for arch in ("arm64", "x64")
-        },
+        f"{prefix}-windows-x64-setup.exe": f"{prefix}-windows-x64-setup.exe",
+        proof_asset(version): "authenticode.json",
+        **{f"{prefix}-macos-{arch}.dmg": f"{prefix}-macos-{arch}.dmg" for arch in ("arm64", "x64")},
+        **{f"{prefix}-linux-{arch}.run": f"{prefix}-linux-{arch}.run" for arch in ("arm64", "x64")},
     }
 
 
-def _extract_installer(archive, members, directory):
-    try:
-        with ZipFile(archive) as package:
-            entries = package.infolist()
-            if len(entries) != len(members) or {entry.filename for entry in entries} != set(members):
-                raise ReleaseError(f"Unexpected or duplicate ZIP entries for {', '.join(members)}.")
-            for entry in entries:
-                name = entry.filename
-                limit = _PROOF_LIMIT if name == "authenticode.json" else _INSTALLER_LIMIT
-                if (
-                    entry.orig_filename != name or entry.is_dir() or entry.flag_bits & 1
-                    or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG)
-                    or not 0 < entry.file_size <= limit
-                ):
-                    raise ReleaseError(f"Invalid ZIP entry for {name}.")
-                destination = directory / name
-                with package.open(entry) as source, destination.open("xb") as target:
-                    shutil.copyfileobj(source, target, length=1024 * 1024)
-                if destination.stat().st_size != entry.file_size:
-                    raise ReleaseError(f"The ZIP entry size differs for {name}.")
-                if name.endswith(".run"):
-                    destination.chmod(0o755)
-    except (OSError, BadZipFile, NotImplementedError, RuntimeError) as exc:
-        raise ReleaseError(f"Could not read the expected installer archive. {exc}") from exc
-
-
-def _download_installer(artifact, members, directory):
-    asset_id = _id(artifact.get("id"), "artifact")
-    digest, size = artifact.get("digest"), artifact.get("size_in_bytes")
+def _download_asset(asset, name, directory):
+    asset_id = _id(asset.get("id"), "release asset")
+    digest, size = asset.get("digest"), asset.get("size")
+    limit = _PROOF_LIMIT if name == "authenticode.json" else _INSTALLER_LIMIT
     if (
-        artifact.get("expired") is not False or not isinstance(digest, str) or not _DIGEST.fullmatch(digest)
-        or type(size) is not int or not 0 < size <= _ARCHIVE_LIMIT
+        asset.get("state") != "uploaded" or not isinstance(digest, str) or not _DIGEST.fullmatch(digest)
+        or type(size) is not int or not 0 < size <= limit
     ):
-        raise ReleaseError(f"Artifact {asset_id} is expired or lacks valid ZIP integrity metadata.")
-    archive = directory / f"artifact-{asset_id}.zip"
-    with archive.open("xb") as handle:
-        _gh("api", "--hostname", "github.com", f"repos/{SIGNING_REPO}/actions/artifacts/{asset_id}/zip",
-            timeout=180, stdout=handle)
-    if _fingerprint(archive) != (size, digest):
-        raise ReleaseError(f"Artifact {asset_id} does not match its GitHub ZIP size and digest.")
-    _extract_installer(archive, members, directory)
-    archive.unlink()
+        raise ReleaseError(f"Release asset {asset_id} is incomplete or lacks valid size and digest metadata.")
+    destination = directory / name
+    with destination.open("xb") as handle:
+        _gh("api", "--hostname", "github.com", f"repos/{PUBLIC_REPO}/releases/assets/{asset_id}",
+            "--header", "Accept: application/octet-stream", timeout=300, stdout=handle)
+    if _fingerprint(destination) != (size, digest):
+        raise ReleaseError(f"Release asset {asset_id} does not match its GitHub size and digest.")
+    if name.endswith(".run"):
+        destination.chmod(0o755)
 
 
 def fetch_installers(version, runs, directory):
-    """Fetch the five installers and Windows proof from their verified workflow runs."""
+    """Fetch the five installers and the Windows proof the verified workflow runs left on the draft release."""
     version = _version(version)
-    groups = _installer_groups(version)
-    if set(runs) != set(groups):
+    if set(runs) != set(SIGNING_WORKFLOWS):
         raise ReleaseError("Provide the reviewed Windows, macOS and Linux workflow run IDs.")
-    tag = f"vwardrsign-{version.replace('.', '_')}"
+    tag = signing_tag(version)
     directory = Path(directory)
     if directory.is_symlink():
         raise ReleaseError("Choose a regular installer output directory.")
     directory.mkdir(parents=True, exist_ok=True)
-    files = {}
     request_commit = None
+    for workflow in SIGNING_WORKFLOWS:
+        run_id = _id(runs[workflow], "workflow run")
+        run = _api(f"repos/{PUBLIC_REPO}/actions/runs/{run_id}")
+        if not isinstance(run, dict):
+            raise ReleaseError(f"Invalid GitHub workflow metadata for run {run_id}.")
+        commit = _commit(run.get("head_sha"))
+        if (
+            run.get("id") != run_id or run.get("status") != "completed" or run.get("conclusion") != "success"
+            or not _matches_run(run, workflow, commit, tag)
+            or request_commit not in (None, commit)
+        ):
+            raise ReleaseError(f"Run {run_id} is not a successful {workflow} run for {tag} on the shared request commit.")
+        request_commit = commit
+    release = _find_release(f"v{version}")
+    if release is None or release["draft"] is not True:
+        raise ReleaseError(f"The installers must be on the unpublished draft release v{version}.")
+    listing = list(_pages(f"repos/{PUBLIC_REPO}/releases/{release['id']}/assets?per_page=100"))
+    expected = _installer_assets(version)
+    files = {}
     with TemporaryDirectory(prefix=".wardr-installers-", dir=directory) as temporary:
         staging = Path(temporary)
-        for workflow, expected in groups.items():
-            run_id = _id(runs[workflow], "workflow run")
-            run = _api(f"repos/{SIGNING_REPO}/actions/runs/{run_id}")
-            if not isinstance(run, dict):
-                raise ReleaseError(f"Invalid GitHub workflow metadata for run {run_id}.")
-            commit = _commit(run.get("head_sha"))
-            if (
-                run.get("id") != run_id or run.get("status") != "completed" or run.get("conclusion") != "success"
-                or not _matches_run(run, workflow, commit, tag)
-                or request_commit not in (None, commit)
-            ):
-                raise ReleaseError(f"Run {run_id} is not a successful {workflow} run for {tag} on the shared request commit.")
-            request_commit = commit
-            listing = list(_pages(f"repos/{SIGNING_REPO}/actions/runs/{run_id}/artifacts?per_page=100", "artifacts"))
-            for artifact_name, members in expected.items():
-                matches = [item for item in listing if item.get("name") == artifact_name]
-                if len(matches) != 1:
-                    raise ReleaseError(f"Expected exactly one {artifact_name} artifact in run {run_id}.")
-                _download_installer(matches[0], members, staging)
-                files.update({name: directory / name for name in members})
+        for asset_name, name in expected.items():
+            matches = [item for item in listing if item.get("name") == asset_name]
+            if len(matches) != 1:
+                raise ReleaseError(f"Expected exactly one {asset_name} on the draft release v{version}.")
+            _download_asset(matches[0], name, staging)
+            files[name] = directory / name
         for name, destination in files.items():
             if (destination.exists() or destination.is_symlink()) and _fingerprint(destination) != _fingerprint(staging / name):
                 raise ReleaseError(f"A different release file already exists at {destination}.")
@@ -394,6 +375,25 @@ def fetch_installers(version, runs, directory):
                 if _fingerprint(destination) != _fingerprint(staging / name):
                     raise ReleaseError(f"A different release file already exists at {destination}.") from None
     return files
+
+
+def tidy_draft(version):
+    """Remove what the installer workflows left on the draft besides the release files: staging files and the proof."""
+    tag = f"v{_version(version)}"
+    release = _find_release(tag)
+    if release is None:
+        raise ReleaseError(f"Could not find the draft GitHub release for {tag}.")
+    if not release["draft"]:
+        return
+    leftovers = [
+        asset for asset in _pages(f"repos/{PUBLIC_REPO}/releases/{release['id']}/assets?per_page=100")
+        if isinstance(asset.get("name"), str)
+        and (asset["name"].startswith(STAGING_PREFIX) or asset["name"] == proof_asset(version))
+    ]
+    for asset in leftovers:
+        if not _same_release(tag, release["id"])["draft"]:
+            raise ReleaseError(f"GitHub release {tag} was published before its staging files were removed.")
+        _api(f"repos/{PUBLIC_REPO}/releases/assets/{_id(asset.get('id'), 'release asset')}", "--method", "DELETE")
 
 
 def _find_release(tag):
@@ -456,14 +456,19 @@ def _expected_assets(assets):
     return expected
 
 
-def stage_draft(version, assets):
-    """Stage missing exact assets on a draft and return whether it remains a draft."""
+def stage_draft(version, assets, target=None):
+    """Stage missing exact assets on a draft and return whether it remains a draft.
+
+    With ``target`` (the reviewed commit), a missing draft is created before its tag exists, so the
+    installer workflows can read the sealed wheel from it; the tag is pushed at publication.
+    """
     tag = f"v{_version(version)}"
     expected = _expected_assets(assets)
     release = _find_release(tag)
     if release is None:
+        where = ("--target", _commit(target)) if target is not None else ("--verify-tag",)
         try:
-            _gh("release", "create", tag, "--repo", f"github.com/{PUBLIC_REPO}", "--draft", "--prerelease", "--verify-tag",
+            _gh("release", "create", tag, "--repo", f"github.com/{PUBLIC_REPO}", "--draft", "--prerelease", *where,
                 "--title", f"Wardr Community {version}", "--notes", "Download Wardr for your platform below.")
         except ReleaseError:
             release = _wait_for_draft(tag)

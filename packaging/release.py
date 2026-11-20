@@ -16,16 +16,15 @@ import tomllib
 from zipfile import ZipFile
 
 from release_github import (
-    LIVE_RELEASE_WORKFLOW, ReleaseError, dispatch_live_release, fetch_installers, promote, stage_draft, wait_checks,
-    wait_live_release, wait_signing,
+    LIVE_RELEASE_WORKFLOW, SIGNING_WORKFLOWS, ReleaseError, dispatch_live_release, fetch_installers, promote,
+    signing_tag, stage_draft, tidy_draft, wait_checks, wait_live_release, wait_signing,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SOFTWARE = "Luminary-Analytics/wardr"
 SITE = "Luminary-Analytics/wardr-site"
-SIGNING = "Luminary-Analytics/resonant-client"
-REQUEST = Path("packaging/wardr-release")
+REQUEST = Path("packaging/signing/request.json")
 PUBLIC_KEY = Path("wardr/keys/release.pem")
 APPLE_TEAM = "9M6C299C9U"
 VERSION = re.compile(r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}")
@@ -235,43 +234,44 @@ def check_candidate_upgrade(site, stage, source, wheel, state, key):
     save_state(stage, state)
 
 
-def prepare_request(repo, work, version, commit, wheel):
-    tag = "vwardrsign-" + version.replace(".", "_")
+def prepare_request(work, version, commit, wheel):
+    """Put the sealed wheel on the draft release, then commit the signing request and push its tag.
+
+    The installer workflows (packaging/signing/README.md) read the wheel from the draft, which only
+    maintainers can see, and check it against the committed request's SHA-256.
+    """
+    tag = signing_tag(version)
     ref = f"refs/tags/{tag}"
     request = {"schema_version": 1, "version": version, "commit": commit, "wheel_sha256": digest(wheel)}
-    existing = remote_ref(repo, ref)
+    existing = remote_ref(ROOT, ref)
     if existing:
-        git(repo, "fetch", "--no-tags", "--no-write-fetch-head", "origin", existing)
-        current = json.loads(git(repo, "show", f"{existing}:{REQUEST}/request.json", capture=True))
-        tagged_wheel = git(repo, "show", f"{existing}:{REQUEST}/{wheel.name}", capture=True)
-        if current != request or sha256(tagged_wheel).hexdigest() != request["wheel_sha256"]:
-            raise ReleaseError(f"The protected signing tag {tag} already identifies a different request.")
+        git(ROOT, "fetch", "--no-tags", "--no-write-fetch-head", "origin", existing)
+        current = json.loads(git(ROOT, "show", f"{existing}:{REQUEST.as_posix()}", capture=True))
+        if current != request:
+            raise ReleaseError(f"The signing tag {tag} already identifies a different request.")
         return tag, existing
-    with main_worktree(repo, work) as checkout:
-        for filename in ("wardr-windows-sign.yml", "wardr-macos-sign.yml", "wardr-linux-build.yml"):
+    stage_draft(version, [wheel], target=commit)
+    with main_worktree(ROOT, work) as checkout:
+        for filename in SIGNING_WORKFLOWS:
             if not (checkout / ".github/workflows" / filename).is_file():
-                raise ReleaseError(f"The signing repository is missing {filename}.")
-        request_path = checkout / REQUEST
-        if not (request_path / "read_request.py").is_file():
-            raise ReleaseError("The signing repository is missing the Wardr request validator.")
-        for previous in request_path.glob("wardr-*-py3-none-any.whl"):
-            previous.unlink()
-        shutil.copyfile(wheel, request_path / wheel.name)
-        (request_path / "request.json").write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+                raise ReleaseError(f"Wardr's main branch is missing the installer workflow {filename}.")
+        if not (checkout / REQUEST.parent / "read_request.py").is_file():
+            raise ReleaseError("Wardr's main branch is missing the signing request validator.")
+        (checkout / REQUEST).write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
         git(checkout, "add", "--", REQUEST)
         git(checkout, "diff", "--cached", "--check")
-        git(checkout, "commit", "-m", f"Authorize Wardr {version} installer builds")
+        git(checkout, "commit", "-m", f"Request Wardr {version} installers")
         request_commit = git_text(checkout, "rev-parse", "HEAD")
         git(checkout, "push", "--atomic", "origin", "HEAD:refs/heads/main", f"HEAD:{ref}")
     return tag, request_commit
 
 
-def collect_installers(signing, work, stage, version, wheel, state, args):
+def collect_installers(work, stage, version, wheel, state, args):
     folder = stage / "installers"
     names = [*installer_names(version), "authenticode.json"]
     if "installers" not in state:
-        tag, request_commit = prepare_request(signing, work, version, state["commit"], wheel)
-        log(f"Waiting for protected installer jobs on {tag}.")
+        tag, request_commit = prepare_request(work, version, state["commit"], wheel)
+        log(f"Waiting for the installer workflows on {tag}; the owner approves their signing jobs.")
         runs = wait_signing(tag, request_commit, args.timeout, retry_failed=args.retry_failed)
         with TemporaryDirectory(prefix="wardr-verified-", dir=stage) as temporary:
             fetch_installers(version, runs, Path(temporary))
@@ -328,6 +328,7 @@ def publish(site, work, source, packages, installers, windows_sha, state, args):
             public / "downloads/SHA256SUMS",
         ]
         ensure_release_tag(version, state["commit"])
+        tidy_draft(version)
         draft = stage_draft(version, assets)
         with TemporaryDirectory(prefix="wardr-catalog-") as temporary:
             catalog = Path(temporary) / "catalog"
@@ -371,7 +372,7 @@ def release(args):
     version = args.version
     version_key(version)
     state_dir = ROOT / "dist" / "release" / version
-    paths = ((ROOT, SOFTWARE), (args.site, SITE), (args.signing_repo, SIGNING))
+    paths = ((ROOT, SOFTWARE), (args.site, SITE))
     for path, repo in paths:
         require_repo(path, repo)
     state_file = state_dir / "state.json"
@@ -417,8 +418,7 @@ def release(args):
         check_candidate_upgrade(args.site, state_dir, source, wheel, state, key)
         # Persistent parent keeps any failed, dirty worktrees available for diagnosis.
         worktrees = Path(mkdtemp(prefix="wardr-work-", dir=state_dir))
-        installers, windows_sha = collect_installers(args.signing_repo, worktrees / "request",
-                                                     state_dir, version, wheel, state, args)
+        installers, windows_sha = collect_installers(worktrees / "request", state_dir, version, wheel, state, args)
         check_candidate_upgrade(args.site, state_dir, source, wheel, state, key)
         publish(args.site, worktrees / "site", source, packages, installers, windows_sha, state, args)
         worktrees.rmdir()
@@ -430,7 +430,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--site", type=lambda value: Path(value).expanduser().resolve(), required=True)
-    parser.add_argument("--signing-repo", type=lambda value: Path(value).expanduser().resolve(), required=True)
     parser.add_argument("--signing-key", type=lambda value: Path(value).expanduser().resolve(), required=True)
     parser.add_argument("--timeout", type=int, default=5400, help="Seconds to wait for each group of CI jobs.")
     parser.add_argument("--plan", action="store_true", help="Show the pinned release plan without making changes.")

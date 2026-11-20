@@ -91,15 +91,15 @@ Blender is only needed to edit or re-render the supplied brand assets.
 
 Use a maintainer Mac with Python 3.11 or newer, uv, Git, GitHub CLI, OpenSSL 3
 on `PATH`, and Xcode command-line tools for `codesign` and `xcrun stapler`.
-Authenticate GitHub CLI as a maintainer who can push to all three repositories,
-create the protected signing tag, and dispatch workflows in the public Wardr
+Authenticate GitHub CLI as a maintainer who can push to Wardr and the site,
+create the protected `sign-v*` tag, and dispatch workflows in the public Wardr
 repository. Review the new version in
 `pyproject.toml` and push the reviewed commit to the public Wardr repository's
-`main` branch. From that commit, run the release with the company site checkout,
-the existing private signing checkout, and the local Wardr release key.
+`main` branch. From that commit, run the release with the company site checkout
+and the local Wardr release key.
 
 ```console
-python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-repo ../resonant-client --signing-key ~/.config/wardr-release/community-ed25519.pem
+python3.11 packaging/release.py --version X.Y.Z --site ../Wardr-Site --signing-key ~/.config/wardr-release/community-ed25519.pem
 ```
 
 Add `--plan` for a read-only preview. Rerun the same command to resume, and
@@ -112,10 +112,14 @@ check the Render deploy log and rerun the same command after resolving it.
    commit. It tests an in-place upgrade from the currently published signed
    wheel to the candidate in a disposable installation and checks that saved
    state survives the restart.
-2. It stages the request and sealed wheel on `main` and a release tag in the
-   existing private signing repository. Its Windows, macOS, and Linux jobs
-   build and test the native installers and run the platform signing steps.
-3. It uploads the verified artifacts to a GitHub draft, checks the uploaded
+2. It puts the sealed wheel on the draft GitHub release, commits the signing
+   request to `main` and pushes the `sign-vX.Y.Z` tag. This repository's
+   Windows, macOS, and Linux release workflows build and test the native
+   installers and run the platform signing steps; the owner approves each
+   signing job. The verified installers land on the draft, never in public
+   Actions artifacts. [Release signing](../packaging/signing/README.md)
+3. It downloads and checks the verified installers, removes the staging files,
+   uploads the remaining release files to the draft, checks the uploaded
    bytes, and stages and validates the company site with signed app and
    installer catalogs. It publishes with the existing GitHub prerelease
    status, pushes the site for Render to deploy, then verifies the live
@@ -135,8 +139,8 @@ target is publicly live. Rerun the same command to resume the recorded Actions
 run. Add `--retry-failed` to rerun failed jobs while the target is still the live
 version.
 
-Keep the Wardr release key local and outside the repositories. Keep platform
-signing credentials in the protected private release environment. Installed
+Keep the Wardr release key local and outside the repositories. Platform
+signing credentials stay in this repository's protected `release` environment. Installed
 Wardr clients verify the signed feed on getwardr.com using PyCA cryptography.
 Wardr 0.2.0 users can install the current wheel manually to get in-app
 updates. [Security policy](../SECURITY.md)

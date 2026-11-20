@@ -3,13 +3,12 @@
 from contextlib import redirect_stderr
 from hashlib import sha256
 from importlib.util import module_from_spec, spec_from_file_location
-from io import BytesIO, StringIO
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
-from zipfile import ZipFile
 
 
 SPEC = spec_from_file_location(
@@ -20,32 +19,29 @@ SPEC.loader.exec_module(github)
 
 VERSION = "0.3.4"
 COMMIT = "a" * 40
-SIGNING_TAG = "vwardrsign-0_3_4"
+SIGNING_TAG = "sign-v0.3.4"
 
 
 def digest(data):
     return f"sha256:{sha256(data).hexdigest()}"
 
 
-class VerifiedArtifactTests(unittest.TestCase):
+class VerifiedInstallerTests(unittest.TestCase):
     def setUp(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        groups = github._installer_groups(VERSION)
-        self.runs = dict(zip(groups, (11, 12, 13)))
-        self.artifacts = {}
+        self.runs = dict(zip(github.SIGNING_WORKFLOWS, (11, 12, 13)))
+        self.release = {"id": 37, "tag_name": f"v{VERSION}", "draft": True, "prerelease": True}
+        self.assets = []
+        self.bytes = {}
         self.contents = {}
-        self.archives = {}
-        for workflow, names in groups.items():
-            run_id = self.runs[workflow]
-            self.artifacts[run_id] = []
-            for name, members in names.items():
-                entries = {member: member.encode() for member in members}
-                self.contents.update(entries)
-                artifact = {"id": len(self.archives) + 100, "name": name, "expired": False}
-                self.artifacts[run_id].append(artifact)
-                self.archive(artifact, entries)
+        for asset_name, name in github._installer_assets(VERSION).items():
+            content = asset_name.encode()
+            self.contents[name] = content
+            self.add_asset(asset_name, content)
+        self.add_asset("staging-windows-1-1-unsigned-leftover.exe", b"left by a failed run")
+        self.deleted = []
         api = patch.object(github, "_api", side_effect=self.api)
         cli = patch.object(github, "_gh", side_effect=self.cli)
         api.start()
@@ -53,54 +49,79 @@ class VerifiedArtifactTests(unittest.TestCase):
         self.addCleanup(api.stop)
         self.addCleanup(cli.stop)
 
-    def archive(self, artifact, entries):
-        buffer = BytesIO()
-        with ZipFile(buffer, "w") as archive:
-            for name, content in entries.items():
-                archive.writestr(name, content)
-        content = buffer.getvalue()
-        self.archives[artifact["id"]] = content
-        artifact.update(size_in_bytes=len(content), digest=digest(content))
+    def add_asset(self, name, content):
+        asset = {"id": 100 + len(self.assets), "name": name, "state": "uploaded",
+                 "size": len(content), "digest": digest(content)}
+        self.assets.append(asset)
+        self.bytes[asset["id"]] = content
+        return asset
 
     def api(self, endpoint, *options, **kwargs):
         path = urlsplit(endpoint).path
-        run_id = int(path.split("/runs/")[1].split("/")[0])
-        if path.endswith("/artifacts"):
-            return [{"artifacts": self.artifacts[run_id]}]
-        workflow = next(name for name, value in self.runs.items() if value == run_id)
-        return {
-            "id": run_id, "path": f".github/workflows/{workflow}", "head_branch": SIGNING_TAG,
-            "head_sha": COMMIT, "event": "push", "status": "completed", "conclusion": "success",
-        }
+        if "/actions/runs/" in path:
+            run_id = int(path.split("/runs/")[1])
+            workflow = next(name for name, value in self.runs.items() if value == run_id)
+            return {
+                "id": run_id, "path": f".github/workflows/{workflow}", "head_branch": SIGNING_TAG,
+                "head_sha": COMMIT, "event": "push", "status": "completed", "conclusion": "success",
+            }
+        if path.endswith("/releases"):
+            return [[self.release.copy()]]
+        if path.endswith("/releases/37/assets"):
+            return [[asset.copy() for asset in self.assets]]
+        self.assertIn("/releases/assets/", path)
+        self.assertEqual(options, ("--method", "DELETE"))
+        asset_id = int(path.rsplit("/", 1)[1])
+        self.deleted.append(next(asset["name"] for asset in self.assets if asset["id"] == asset_id))
+        self.assets = [asset for asset in self.assets if asset["id"] != asset_id]
+        return {}
 
     def cli(self, *arguments, stdout, **kwargs):
         self.assertEqual(arguments[:3], ("api", "--hostname", "github.com"))
-        self.assertTrue(arguments[3].endswith("/zip"))
-        stdout.write(self.archives[int(arguments[3].split("/")[-2])])
+        self.assertIn("Accept: application/octet-stream", arguments)
+        stdout.write(self.bytes[int(arguments[3].rsplit("/", 1)[1])])
 
     def test_installer_download_is_repeatable(self):
         for _ in range(2):
             files = github.fetch_installers(VERSION, self.runs, self.root / "installers")
             self.assertEqual({name: path.read_bytes() for name, path in files.items()}, self.contents)
 
-    def test_rejects_wrong_archive_digest_before_writing_installers(self):
-        self.artifacts[11][0]["digest"] = "sha256:" + "f" * 64
+    def test_rejects_wrong_asset_digest_before_writing_installers(self):
+        self.assets[0]["digest"] = "sha256:" + "f" * 64
         destination = self.root / "installers"
-        with self.assertRaisesRegex(github.ReleaseError, "does not match its GitHub ZIP size and digest"):
+        with self.assertRaisesRegex(github.ReleaseError, "does not match its GitHub size and digest"):
             github.fetch_installers(VERSION, self.runs, destination)
         self.assertEqual(list(destination.iterdir()), [])
 
-    def test_rejects_traversal_even_with_matching_archive_digest(self):
-        names = github._installer_groups(VERSION)["wardr-windows-sign.yml"]
-        (members,) = names.values()
-        entries = {name: self.contents[name] for name in members}
-        entries["../outside.txt"] = b"Invalid archive fixture"
-        self.archive(self.artifacts[11][0], entries)
+    def test_requires_every_installer_once_on_an_unpublished_draft(self):
         destination = self.root / "installers"
-        with self.assertRaisesRegex(github.ReleaseError, "Unexpected or duplicate ZIP entries"):
+        self.add_asset(f"wardr-{VERSION}-linux-x64.run", b"a second copy")
+        with self.assertRaisesRegex(github.ReleaseError, "Expected exactly one"):
+            github.fetch_installers(VERSION, self.runs, destination)
+        self.release["draft"] = False
+        with self.assertRaisesRegex(github.ReleaseError, "unpublished draft"):
             github.fetch_installers(VERSION, self.runs, destination)
         self.assertEqual(list(destination.iterdir()), [])
-        self.assertFalse((self.root / "outside.txt").exists())
+
+    def test_rejects_runs_from_another_tag(self):
+        with patch.object(github, "SIGNING_TAG_PREFIX", "other-v"):
+            with self.assertRaisesRegex(github.ReleaseError, "is not a successful"):
+                github.fetch_installers(VERSION, self.runs, self.root / "installers")
+
+    def test_tidy_removes_only_staging_files_and_the_proof(self):
+        github.tidy_draft(VERSION)
+        self.assertEqual(sorted(self.deleted),
+                         sorted(["staging-windows-1-1-unsigned-leftover.exe", github.proof_asset(VERSION)]))
+        self.assertEqual(len(self.assets), len(github._installer_assets(VERSION)) - 1)
+        self.release["draft"] = False
+        self.deleted.clear()
+        github.tidy_draft(VERSION)
+        self.assertEqual(self.deleted, [])
+
+    def test_the_signing_tag_names_the_version(self):
+        self.assertEqual(github.signing_tag(VERSION), SIGNING_TAG)
+        with self.assertRaisesRegex(github.ReleaseError, "sign-vX.Y.Z"):
+            github.wait_signing("vwardrsign-0_3_4", COMMIT, 60)
 
 
 class DraftReleaseTests(unittest.TestCase):
@@ -162,6 +183,20 @@ class DraftReleaseTests(unittest.TestCase):
         wait.assert_called_once_with(2)
         self.assertIn("--prerelease", cli.call_args.args)
         self.assertIn("--verify-tag", cli.call_args.args)
+
+    def test_a_draft_for_the_installer_workflows_targets_the_reviewed_commit(self):
+        results = (None, None, self.release, self.release)
+        with (
+            patch.object(github, "_find_release", side_effect=results),
+            patch.object(github, "_gh") as cli,
+            patch.object(github, "sleep"),
+        ):
+            self.assertTrue(github.stage_draft(VERSION, self.files, target=COMMIT))
+        arguments = cli.call_args.args
+        self.assertIn("--draft", arguments)
+        self.assertIn("--prerelease", arguments)
+        self.assertEqual(arguments[arguments.index("--target") + 1], COMMIT)
+        self.assertNotIn("--verify-tag", arguments)
 
     def test_conflicting_existing_asset_blocks_staging(self):
         self.remote["release.json"]["digest"] = "sha256:" + "f" * 64
