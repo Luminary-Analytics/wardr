@@ -18,6 +18,8 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
   source, troubleshooting, native checks, builds, and the release workflow.
 - [Security policy](SECURITY.md) covers vulnerability reporting and release
   verification.
+- [Signing handoff](docs/HANDOFF_SIGNING_MOVE.md) records the decision to sign
+  Wardr's installers in this repository and the work left to do.
 - [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
   contains the public site and its download publishing workflow.
 
