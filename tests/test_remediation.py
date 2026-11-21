@@ -77,10 +77,11 @@ class TransactionalRemediationTests(unittest.TestCase):
                 applied = remediation.apply_fix("kube-config-permissions", state_dir=state_dir)
                 self.assertTrue(applied["ok"])
 
-                # Replace file with a different inode.
-                cfg.unlink()
-                cfg.write_text("replaced\n", encoding="utf-8")
-                os.chmod(cfg, 0o600)
+                # Atomically replace file with a different inode and content.
+                replacement = kube_dir / "config.replacement"
+                replacement.write_text("replaced-content\n", encoding="utf-8")
+                os.chmod(replacement, 0o600)
+                replacement.replace(cfg)
 
                 undone = remediation.undo_fix(applied["rollback_id"], state_dir)
                 self.assertFalse(undone["ok"])

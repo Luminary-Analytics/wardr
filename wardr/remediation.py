@@ -473,6 +473,8 @@ def apply_fix(check_id: str, state_dir: Path | None = None) -> dict:
                             "label": f"~/{rel_dir}/{name}",
                             "dev": updated.st_dev,
                             "ino": updated.st_ino,
+                            "size": updated.st_size,
+                            "mtime_ns": updated.st_mtime_ns,
                             "old_mode": old_mode,
                             "new_mode": new_mode,
                         })
@@ -558,10 +560,14 @@ def undo_fix(rollback_id: str, state_dir: Path) -> dict:
                     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
                     try:
                         info = os.fstat(fd)
+                        expected_size = item.get("size")
+                        expected_mtime = item.get("mtime_ns")
                         if (
                             not stat.S_ISREG(info.st_mode)
                             or info.st_uid != os.geteuid()
                             or (info.st_dev, info.st_ino) != (expected_dev, expected_ino)
+                            or (expected_size is not None and info.st_size != int(expected_size))
+                            or (expected_mtime is not None and info.st_mtime_ns != int(expected_mtime))
                             or not _acl_absent(fd)
                         ):
                             raise PermissionError("File identity or ACL changed since remediation")
