@@ -12,8 +12,15 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
 
 ## Project documentation
 
-- [Architecture](docs/ARCHITECTURE.md) covers software components, evidence
-  and repair flows, data storage, trust boundaries, and coverage.
+- [Architecture](docs/ARCHITECTURE.md) covers software components, Mermaid
+  system and rollback diagrams, evidence and repair flows, local state, and
+  trust boundaries.
+- [Wardr Fleet Guide](docs/FLEET.md) covers the self-hosted RBAC Fleet
+  control plane, Web Console, enrollment and bulk-remediation sequence
+  diagrams, hardened daemon templates, and HTTP API.
+- [Threat Network & Rapid-Defense Feeds](docs/THREAT_NETWORK.md) covers the
+  zero-day immune loop diagram, client-side PII/secret redaction, zero-RCE
+  Ed25519 feed schemas, and clustering intake server.
 - [Development and operations](docs/DEVELOPMENT.md) covers running from
   source, troubleshooting, native checks, builds, and the release workflow.
 - [Security policy](SECURITY.md) covers vulnerability reporting and release
@@ -22,6 +29,18 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
   Wardr's installers in this repository and the work left to do.
 - [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
   contains the public site and its download publishing workflow.
+
+```mermaid
+flowchart LR
+    Host["Personal Laptop or Server\n(Auto-SBOM · AI/MCP · FIM · Baselines · Rollback Fixes)"]
+    Fleet["Wardr Fleet Console\n(RBAC · Cross-Host Correlation · Zero-RCE Bulk Fixes)"]
+    TN["Wardr Threat Network\n(Redacted Zero-Day Clustering · Ed25519 Signed Feeds)"]
+
+    Host -- "Opt-in HTTPS Heartbeat" --> Fleet
+    Fleet -. "Allowlisted Actions Only" .-> Host
+    Host -- "User-Approved Redacted Report" --> TN
+    TN -. "Signed Zero-RCE Rules & Advisories" .-> Host
+```
 
 ## Install
 

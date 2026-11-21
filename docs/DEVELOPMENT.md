@@ -29,7 +29,7 @@ data for the browser demo. [Wardr demo](https://getwardr.com/#demo)
 | --- | --- |
 | The dashboard denies access | Use the complete URL printed by the running Wardr process in the current browser tab. A restart issues a fresh launch token. |
 | Checks or event sources show limited coverage | Review the evidence and coverage entries for the collector. Account permissions, missing OS tools, unavailable logs, or stale cached update data can explain gaps. |
-| No repair option is offered | Run a fresh scan and review the finding. The checklist offers automatic repair only for eligible SSH permission failures on macOS and Linux. |
+| No repair option is offered | Run a fresh scan and review the finding. The checklist offers automatic rollback-safe repair for eligible `~/.ssh`, `~/.aws`, `~/.kube`, `~/.gnupg`, and `~/.docker` permission failures on macOS and Linux (requiring matching ownership and no extended ACLs). |
 | Software assessment has no matches | Confirm that the CycloneDX data contains versioned package identifiers and that the supplied OSV records cover those packages. Review unassessed entries in the assessment summary. |
 | The local model is unavailable | Run `wardr model status` and check that Ollama is running locally and the pinned model is ready. The deterministic remediation plan is available independently. |
 | In-place updates are unavailable | Install a published wheel in a pipx or Python virtual environment. Confirm pip is available to Wardr's interpreter or uv is on `PATH`, and check that the dashboard is online. |
@@ -53,11 +53,19 @@ connected, confirm readiness with `wardr model status`, and then start
 Wardr update downloads. Ollama manages the model files and can be configured
 to disable its cloud features. [Ollama offline settings](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
 
-- `wardr scan --format json` exports a device scan.
+- `wardr scan --format json` exports a device, credential, and AI/MCP posture scan.
 - `wardr exposure` lists the current local socket inventory as JSON.
-- `wardr assess --sbom inventory.json --advisories advisories.json` stores
-  assessment results for the selected state directory.
+- `wardr surface` runs a non-destructive audit of exposed risky DB/AI ports and loopback TLS certificates.
+- `wardr inventory [--format cyclonedx]` runs an incremental zero-subprocess Auto-SBOM and AI surface audit.
+- `wardr fim [--init]` initializes or verifies SHA-256 File Integrity Monitoring for critical security configs.
+- `wardr assess --auto` (or `--sbom inventory.json --advisories advisories.json`) matches installed packages against OSV, Rapid-Defense Feeds, and CISA KEV.
+- `wardr fix --preview <id> | --apply <id> | --undo <rollback_id> | --history` manages transactional one-click fixes with rollback snapshots.
+- `wardr feed [--import-bundle ... --signature ... | --sign ... --signing-key ... | --refresh]` verifies, signs, or refreshes Ed25519 Rapid-Defense Feeds.
+- `wardr report-issue (--finding <id> | --alert <id> | --custom <title>) [--zero-day] [--out file.json | --submit]` builds, previews, exports, or submits strictly redacted vulnerability reports.
 - `wardr plan --format html` builds an exportable remediation plan.
+- `wardr service-template --platform systemd|launchd|windows [--fleet]` outputs a hardened continuous monitoring or fleet-agent service template.
+- `wardr fleet server|enroll|checkin|agent|status` runs or joins the self-hosted Wardr Fleet control plane (see [docs/FLEET.md](FLEET.md)).
+- `wardr threat-network` runs the self-hostable zero-day clustering intake and signed feed server (see [docs/THREAT_NETWORK.md](THREAT_NETWORK.md)).
 - `wardr advisories --refresh` explicitly downloads a fresh CISA catalog.
 - `wardr update --check` checks the signed release channel. `wardr update`
   checks and installs an eligible newer release. Both commands require
@@ -73,14 +81,17 @@ python -m unittest discover -s tests -v
 uv build
 ```
 
-Unit tests cover dashboard access, posture parsing and SSH repair safety,
-socket-table interpretation, inventory matching, hunting rules, and the
-local-model interface. Release tests also exercise signature and artifact
-verification and installation eligibility. The native GitHub Actions job uses
-Python 3.11 on Ubuntu, macOS, and Windows. It exercises the CLI collectors and plan
-export, builds a wheel and source archive, installs the wheel, and checks
-the installed entry point. Full collector coverage still depends on the
-host and account behind the test. [CI workflow](../.github/workflows/checks.yml)
+Unit and integration tests (86 tests across 14 modules) cover dashboard access,
+posture parsing and transactional rollback repair safety, socket-table and
+attack-surface auditing, incremental Auto-SBOM and AI/MCP checks, SHA-256 FIM,
+persistent baseline-drift hunting, Ed25519 Rapid-Defense Feeds, client-side
+report redaction, the self-hosted Threat Network clustering server, the Wardr
+Fleet RBAC control plane and agent, and the local-model interface. Release tests
+also exercise signature and artifact verification and installation eligibility.
+The native GitHub Actions job uses Python 3.11 on Ubuntu, macOS, and Windows. It
+exercises the CLI collectors and plan export, builds a wheel and source archive,
+installs the wheel, and checks the installed entry point. Full collector
+coverage still depends on the host and account behind the test. [CI workflow](../.github/workflows/checks.yml)
 
 Setuptools packages the Python modules and dashboard assets. The wheel is
 platform-independent Python with platform-specific behavior selected at

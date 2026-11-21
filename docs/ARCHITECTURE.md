@@ -15,18 +15,43 @@ for Ed25519 verification. Operating-system tools and access vary by platform.
 ## Components and data flow
 
 ```mermaid
-flowchart LR
-    Browser["Local browser"] --> Server["Loopback dashboard server"]
-    Server --> State["Dashboard state and workers"]
-    CLI["Wardr CLI"] --> Core["Local collection and assessment"]
-    State --> Core
-    Core --> Evidence["Host settings, socket tables, events, imported JSON"]
-    Core --> Store["Per-user scan, event, advisory and software state"]
-    Store --> Plan["Reports and remediation plan"]
-    Core --> Plan
-    Plan -. "Optional task review" .-> Ollama["Local Ollama"]
-    Core -. "Optional public catalog refresh" .-> CISA["CISA"]
+flowchart TB
+    subgraph Local["Wardr Host Node (Desktop or Server)"]
+        Browser["Local Browser\n(127.0.0.1 + Token + CSP)"] --> Server["Loopback Dashboard\n(server.py + state.py)"]
+        CLI["Headless CLI\n(cli.py)"] --> Core
+        Server --> Core
+
+        subgraph Core["Local Assessment, Defense & Remediation Core"]
+            Posture["Host, Credential & AI/MCP Checks\n(checks.py + inventory.py)"]
+            Surface["Socket, DB/AI Port & TLS Audit\n(exposure.py + surface.py)"]
+            Sensors["Zero-Subprocess Monitor, Baselines & FIM\n(monitor.py + fim.py + hunting.py)"]
+            SBOM["Incremental Auto-SBOM & OSV/KEV Matcher\n(inventory.py + assessment.py + intel.py)"]
+            Fix["Transactional 1-Click Fix + Rollback\n(remediation.py)"]
+            Plan["Unified Plan & HTML/JSON Reports\n(plan.py + report.py)"]
+            Redact["Client-Side Redactor\n(reporting.py)"]
+        end
+
+        Store[("Per-User Local State\nSQLite (2,000 events + baselines),\nFIM, SBOM cache, Rollback history")]
+        Core <--> Store
+        Posture & Surface & Sensors & SBOM --> Plan
+        Plan -. "Optional anonymized IDs" .-> Ollama["Local Ollama\n(127.0.0.1:11434)"]
+    end
+
+    subgraph OptionalNetwork["Optional Network & Enterprise Extensions (Disabled in --offline)"]
+        CISA["Public CISA KEV Catalog"]
+        Feeds["Ed25519-Signed Rapid-Defense Feeds\n(feeds.py · Zero-RCE)"]
+        TN["Wardr Threat Network\n(threat_network.py · Clustering & CVD)"]
+        Fleet["Wardr Fleet Control Plane\n(fleet.py + fleet_agent.py · RBAC)"]
+    end
+
+    SBOM -. "Opt-in pull (0 local data)" .-> CISA
+    Feeds -. "Offline Ed25519 verify" .-> Sensors
+    Feeds -. "Rapid advisories" .-> SBOM
+    Redact -. "User-approved redacted JSON" .-> TN
+    Core <-. "Opt-in HTTPS Heartbeat &\nAllowlisted Commands Only" .-> Fleet
 ```
+
+See also the dedicated [Wardr Fleet Guide](FLEET.md) and [Threat Network & Rapid-Defense Feeds Guide](THREAT_NETWORK.md) for sequence diagrams, RBAC matrices, and deployment topology.
 
 The desktop entry point starts a local Python HTTP server and opens the
 dashboard, a packaged HTML, CSS, and JavaScript application. Headless commands
@@ -82,19 +107,47 @@ checklist at the same time.
   task includes the available evidence, an action, and a verification
   step. The dashboard and CLI use the same plan builder.
 
-### One-click repair
+### Transactional one-click repair & rollback
 
 The installed dashboard offers **Review fix** only when the latest scan found
-an eligible failure. After confirmation, the server accepts the finding ID
-and dispatches it to the allowlisted repair in `checks.py`. Wardr rechecks
-the target after the change and updates that finding.
+an eligible failure. Before modifying anything, the dashboard fetches
+`POST /api/fix/preview` to show the exact target paths and octal mode changes
+(for example `0644 → 0600`). After confirmation, `wardr/remediation.py` saves
+an atomic rollback snapshot, applies the allowlisted permission change via
+`os.fchmod`, and independently re-verifies the check.
 
-Automatic repair is limited to the current unprivileged user's SSH
-permissions on macOS and Linux. It can remove group and other access from
-`~/.ssh` and standard identity files, or group and other write access from
-standard authorized-keys files. The repair checks ownership, avoids following
-symlinks, and requires manual review when ownership, file identity, or ACLs
-cannot be verified. Other findings include guidance for manual remediation.
+```mermaid
+sequenceDiagram
+    participant Op as Operator / Dashboard
+    participant Rem as remediation.py
+    participant FS as Local POSIX Filesystem
+    participant Hist as remediation-history.json
+
+    Op->>Rem: preview_fix(check_id)
+    Rem->>FS: open(O_NOFOLLOW) + fstat + UID + ACL check
+    Rem-->>Op: Exact mode diff (0644 -> 0600) + reversible=true
+    Op->>Rem: apply_fix(check_id)
+    Rem->>FS: Verify UID, regular file, st_nlink==1, no extended ACLs
+    Rem->>FS: os.fchmod(fd, mode & ~mask) + re-fstat verification
+    Rem->>Hist: Atomically record (dev, ino, size, mtime_ns, old_mode, new_mode)
+    Rem-->>Op: ok=true, verified check=pass, rollback_id
+
+    opt Operator clicks Undo / runs wardr fix --undo
+        Op->>Rem: undo_fix(rollback_id)
+        Rem->>FS: Re-verify dev, ino, size, mtime_ns, UID, no symlink, no ACL
+        Rem->>FS: Restore exact old_mode via os.fchmod
+        Rem-->>Op: ok=true (refuses rollback if target file was replaced)
+    end
+```
+
+Automatic repair covers unprivileged user-owned credential targets on macOS
+and Linux: `~/.ssh` (directory, standard identity files, and authorized-keys
+files), `~/.aws/credentials` and `~/.aws/config`, `~/.kube/config`, `~/.gnupg`,
+and `~/.docker/config.json`. Every repair enforces `O_NOFOLLOW`, ownership
+verification, single hard-link checks, and absence of extended ACLs. Rollback
+additionally verifies `st_dev`, `st_ino`, `st_size`, and `st_mtime_ns` to
+protect against file replacement and Linux ext4 inode reuse. Other findings
+include guidance for manual remediation.
 
 ## Local state
 
@@ -110,10 +163,18 @@ exclude group and other write access.
 
 | File | Contents |
 | --- | --- |
-| `latest-scan.json` | Latest valid device scan for this hostname |
-| `monitor-events.sqlite3` | Up to 180 retained observations |
-| `software-assessment.json` | Computed software findings and coverage from the latest import |
+| `latest-scan.json` | Latest valid device, credential, and AI/MCP posture scan for this hostname |
+| `monitor-events.sqlite3` | Up to 2,000 retained observations plus persistent host baselines (`baselines` table) |
+| `fim-baseline.json` | Saved SHA-256 baseline digests and modes for File Integrity Monitoring |
+| `inventory-cache.json` | Incremental mtime/size-fingerprinted CycloneDX 1.5 auto-SBOM cache |
+| `software-assessment.json` | Computed software findings and coverage from the latest auto or imported assessment |
+| `remediation-history.json` | Bounded history (last 50) of transactional fixes and rollback snapshots |
 | `cisa-kev.json` | Cached public CISA Known Exploited Vulnerabilities catalog |
+| `defense-feed.json` | Locally cached, Ed25519-verified Rapid-Defense Feed (declarative rules & rapid advisories) |
+| `submitted-reports.json` | Local receipts of user-approved redacted central vulnerability reports |
+| `fleet-credentials.json` | `0600` per-host Fleet enrollment credentials (only when enrolled via `wardr fleet enroll`) |
+| `fleet/fleet.sqlite3` | Fleet control-plane database (only when running `wardr fleet server`) |
+| `threat-network/threat-network.sqlite3` | Threat Network intake & cluster store (only when running `wardr threat-network`) |
 
 The software matcher stores its result and uses the imported documents during
 assessment. Exposure is a runtime snapshot. Reports and plans are generated
