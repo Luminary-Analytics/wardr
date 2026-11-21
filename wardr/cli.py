@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import (
-    assessment, checks, exposure, feeds, fim, hunting, intel, inventory,
+    assessment, checks, exposure, feeds, fim, fleet, fleet_agent, hunting, intel, inventory,
     local_ai, remediation, reporting, service, surface, threat_network, updater,
 )
 from .monitor import Monitor
@@ -81,9 +81,27 @@ def _parser() -> argparse.ArgumentParser:
     surface_cmd = commands.add_parser("surface", help="Run a non-destructive local attack-surface and loopback TLS hygiene audit.")
     surface_cmd.add_argument("--no-tls-probe", action="store_true", help="Skip loopback TLS certificate checks.")
 
-    svc_cmd = commands.add_parser("service-template", help="Generate a hardened continuous monitoring service template.")
+    svc_cmd = commands.add_parser("service-template", help="Generate a hardened continuous monitoring or fleet-agent service template.")
     svc_cmd.add_argument("--platform", choices=("systemd", "launchd", "windows"), required=True)
     svc_cmd.add_argument("--interval", type=lambda value: _integer(value, 5, 3600), default=30)
+    svc_cmd.add_argument("--fleet", action="store_true", help="Generate a service unit for `wardr fleet agent` instead of `wardr watch`.")
+
+    fleet_cmd = commands.add_parser("fleet", help="Manage or join a self-hosted Wardr Fleet for servers and user computers.")
+    fleet_sub = fleet_cmd.add_subparsers(dest="fleet_action", required=True)
+    fl_srv = fleet_sub.add_parser("server", help="Start the Wardr Fleet control plane and web console.")
+    fl_srv.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1).")
+    fl_srv.add_argument("--port", type=lambda value: _integer(value, 0, 65535), default=8443)
+    fl_srv.add_argument("--admin-user", default="admin", help="Initial bootstrap administrator username.")
+    fl_srv.add_argument("--admin-password", default=None, help="Initial bootstrap administrator password (auto-generated if omitted).")
+    fl_enr = fleet_sub.add_parser("enroll", help="Enroll this machine into a Wardr Fleet control plane.")
+    fl_enr.add_argument("--server", required=True, help="Wardr Fleet server URL (HTTPS for remote servers).")
+    fl_enr.add_argument("--token", required=True, help="Short-lived enrollment token minted by a Fleet admin.")
+    fl_enr.add_argument("--role", choices=("server", "workstation"), default=None)
+    fl_enr.add_argument("--tags", default="", help="Comma-separated tags (for example prod,linux,us-east).")
+    fleet_sub.add_parser("checkin", help="Perform one fleet heartbeat and execute any queued allowlisted actions.")
+    fl_agt = fleet_sub.add_parser("agent", help="Run the continuous low-overhead Wardr Fleet check-in agent.")
+    fl_agt.add_argument("--interval", type=lambda value: _integer(value, 10, 3600), default=60)
+    fleet_sub.add_parser("status", help="Show this host's local Wardr Fleet enrollment status.")
 
     tn_cmd = commands.add_parser("threat-network", help="Run the self-hostable central intake, zero-day clustering, and signed feed server.")
     tn_cmd.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1).")
@@ -282,7 +300,37 @@ def main(argv: list[str] | None = None) -> int:
             result = surface.audit_exposure(exposure.collect_exposure(), probe_local_tls=not args.no_tls_probe)
             print(json_report(result), end="")
         elif args.command == "service-template":
-            print(service.render_template(args.platform, state_dir=str(args.state_dir) if args.state_dir else "", interval=args.interval), end="")
+            print(
+                service.render_template(
+                    args.platform,
+                    state_dir=str(args.state_dir) if args.state_dir else "",
+                    interval=args.interval,
+                    fleet=args.fleet,
+                ),
+                end="",
+            )
+        elif args.command == "fleet":
+            if args.fleet_action == "server":
+                store = fleet.FleetStore(directory / "fleet")
+                created = store.ensure_bootstrap_admin(args.admin_user, args.admin_password)
+                with fleet.FleetServer((args.host, args.port), store) as srv:
+                    print(f"Wardr Fleet console running at http://{args.host}:{srv.server_port}", flush=True)
+                    if created:
+                        print(f"Bootstrap admin credentials -> username: {created[0]}  password: {created[1]}", flush=True)
+                    try:
+                        srv.serve_forever()
+                    except KeyboardInterrupt:
+                        pass
+            elif args.fleet_action == "enroll":
+                print(json_report(fleet_agent.enroll(
+                    directory, args.server, args.token, role=args.role, tags=args.tags,
+                )), end="")
+            elif args.fleet_action == "checkin":
+                print(json_report(fleet_agent.checkin_once(directory)), end="")
+            elif args.fleet_action == "agent":
+                fleet_agent.run_agent(directory, interval=args.interval)
+            elif args.fleet_action == "status":
+                print(json_report(fleet_agent.agent_status(directory)), end="")
         elif args.command == "threat-network":
             store = threat_network.ThreatNetworkStore(directory / "threat-network")
             key_bytes = Path(args.signing_key).read_bytes() if args.signing_key else None
@@ -343,7 +391,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 0
     except (
-        OSError, ValueError, assessment.AssessmentError, feeds.FeedError,
+        OSError, ValueError, assessment.AssessmentError, feeds.FeedError, fleet_agent.FleetAgentError,
         intel.AdvisoryError, local_ai.LocalAIError, ReleaseError, reporting.ReportingError, updater.UpdaterError,
     ) as exc:
         print(f"Wardr: {exc}", file=sys.stderr)

@@ -3,21 +3,26 @@
 import sys
 
 
-def render_template(target: str, *, state_dir: str = "", interval: int = 30) -> str:
-    """Return a hardened systemd, launchd, or Windows scheduled-task template for wardr watch."""
+def render_template(target: str, *, state_dir: str = "", interval: int = 30, fleet: bool = False) -> str:
+    """Return a hardened systemd, launchd, or Windows scheduled-task template for wardr watch or fleet agent."""
     python_bin = sys.executable or "/usr/bin/python3"
     state_flag = f"--state-dir {state_dir} " if state_dir else ""
+    subcmd = f"fleet agent --interval {interval}" if fleet else f"watch --interval {interval}"
+    desc = "Wardr Continuous Fleet Agent" if fleet else "Wardr Continuous Local Security Monitor"
+    unit_name = "wardr-fleet-agent" if fleet else "wardr-watch"
+    launch_label = "com.getwardr.fleet-agent" if fleet else "com.getwardr.watch"
+    win_task = "WardrFleetAgent" if fleet else "WardrContinuousMonitor"
 
     if target == "systemd":
-        return f"""# Save to /etc/systemd/system/wardr-watch.service (or ~/.config/systemd/user/wardr-watch.service)
-# Then run: systemctl daemon-reload && systemctl enable --now wardr-watch.service
+        return f"""# Save to /etc/systemd/system/{unit_name}.service (or ~/.config/systemd/user/{unit_name}.service)
+# Then run: systemctl daemon-reload && systemctl enable --now {unit_name}.service
 [Unit]
-Description=Wardr Continuous Local Security Monitor
+Description={desc}
 After=network.target
 
 [Service]
 Type=simple
-ExecStart={python_bin} -m wardr {state_flag}watch --interval {interval}
+ExecStart={python_bin} -m wardr {state_flag}{subcmd}
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=yes
@@ -39,15 +44,18 @@ WantedBy=multi-user.target
         args = [python_bin, "-m", "wardr"]
         if state_dir:
             args.extend(["--state-dir", state_dir])
-        args.extend(["watch", "--interval", str(interval)])
+        if fleet:
+            args.extend(["fleet", "agent", "--interval", str(interval)])
+        else:
+            args.extend(["watch", "--interval", str(interval)])
         arg_xml = "\n".join(f"    <string>{a}</string>" for a in args)
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Save to ~/Library/LaunchAgents/com.getwardr.watch.plist and load with launchctl bootstrap -->
+<!-- Save to ~/Library/LaunchAgents/{launch_label}.plist and load with launchctl bootstrap -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.getwardr.watch</string>
+  <string>{launch_label}</string>
   <key>ProgramArguments</key>
   <array>
 {arg_xml}
@@ -63,10 +71,10 @@ WantedBy=multi-user.target
 """
     if target == "windows":
         extra = f"--state-dir '{state_dir}' " if state_dir else ""
-        return f"""# Run in an elevated PowerShell prompt to register a continuous Wardr background monitor
-$Action = New-ScheduledTaskAction -Execute '{python_bin}' -Argument "-m wardr {extra}watch --interval {interval}"
+        return f"""# Run in an elevated PowerShell prompt to register a continuous Wardr background task
+$Action = New-ScheduledTaskAction -Execute '{python_bin}' -Argument "-m wardr {extra}{subcmd}"
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 0)
-Register-ScheduledTask -TaskName 'WardrContinuousMonitor' -Action $Action -Trigger $Trigger -Settings $Settings -RunLevel Limited
+Register-ScheduledTask -TaskName '{win_task}' -Action $Action -Trigger $Trigger -Settings $Settings -RunLevel Limited
 """
     raise ValueError("Choose systemd, launchd, or windows.")

@@ -42,7 +42,8 @@ The public site runs separately from the installed product.
 | Software & AI surface assessment | `wardr/inventory.py`, `wardr/assessment.py`, `wardr/intel.py` | Incremental CycloneDX auto-discovery, AI/MCP hygiene checks, OSV + Rapid-Defense Feed matching, and CISA KEV context |
 | Signed Rapid-Defense Feeds | `wardr/feeds.py` | Offline/HTTPS Ed25519-verified declarative rules, rapid advisories, and allowlisted mitigation IDs (zero remote code execution) |
 | Sanitized central reporting & Threat Network | `wardr/reporting.py`, `wardr/threat_network.py` | Opt-in client-side PII/secret redaction, preview/export/HTTPS submission, and self-hostable zero-day clustering + signed feed publishing |
-| Continuous server templates | `wardr/service.py` | Hardened `systemd`, `launchd`, and Windows scheduled-task templates for `wardr watch` |
+| Self-hosted Fleet management | `wardr/fleet.py`, `wardr/fleet_agent.py`, `wardr/static/fleet.*` | SQLite + RBAC (`admin`/`responder`/`viewer`) control plane, enrollment tokens, cross-host correlation, zero-RCE allowlisted bulk command queue, executive compliance exports, and lightweight check-in agent |
+| Continuous server templates | `wardr/service.py` | Hardened `systemd`, `launchd`, and Windows scheduled-task templates for `wardr watch` and `wardr fleet agent` |
 | Reporting and prioritization | `wardr/report.py`, `wardr/plan.py` | Scan and plan views with text, JSON, and HTML exports |
 | Optional model review | `wardr/local_ai.py` | Suggested groups of existing plan tasks |
 | Release verification | `wardr/release.py` | Ed25519 manifest validation and SHA-256 artifact verification |

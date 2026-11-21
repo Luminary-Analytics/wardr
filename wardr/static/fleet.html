@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wardr Fleet · Core Security Console</title>
+  <link rel="icon" type="image/png" href="/static/wardr-mark.png">
+  <link rel="stylesheet" href="/static/fleet.css">
+  <script src="/static/fleet.js" defer></script>
+</head>
+<body>
+  <section id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="brand-row">
+        <img src="/static/wardr-mark.png" alt="" width="38" height="38">
+        <div>
+          <h1>wardr<span>.</span> <small>fleet</small></h1>
+          <p>Core team command console for servers &amp; endpoints</p>
+        </div>
+      </div>
+      <form id="login-form" class="stack-form">
+        <div class="field">
+          <label for="login-user">Operator username</label>
+          <input id="login-user" type="text" autocomplete="username" value="admin" required>
+        </div>
+        <div class="field">
+          <label for="login-pass">Password</label>
+          <input id="login-pass" type="password" autocomplete="current-password" required>
+        </div>
+        <p id="login-error" class="notice notice-error" role="alert" hidden></p>
+        <button id="login-submit" type="submit" class="btn btn-primary">Sign in to Wardr Fleet</button>
+      </form>
+      <p class="login-foot">Zero-RCE architecture · Strictly allowlisted fixes · RBAC + Audit Log</p>
+    </div>
+  </section>
+
+  <div id="app-shell" class="app-shell" hidden>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand-inline">
+          <img src="/static/wardr-mark.png" alt="" width="30" height="30">
+          <strong>wardr<span class="dot">.</span></strong>
+          <span class="pill pill-lime">FLEET</span>
+        </div>
+        <nav class="nav-tabs" role="tablist" aria-label="Fleet sections">
+          <button type="button" class="nav-tab" data-tab="fleet" aria-selected="true">Fleet &amp; Hosts</button>
+          <button type="button" class="nav-tab" data-tab="enroll" aria-selected="false">Enroll &amp; Team</button>
+          <button type="button" class="nav-tab" data-tab="audit" aria-selected="false">Compliance &amp; Audit</button>
+        </nav>
+        <div class="operator-bar">
+          <span id="op-identity" class="op-identity"></span>
+          <button type="button" id="refresh-btn" class="btn btn-ghost btn-sm">Refresh</button>
+          <button type="button" id="logout-btn" class="btn btn-ghost btn-sm">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <p id="fleet-notice" class="notice" role="status" hidden></p>
+
+      <section id="tab-fleet" class="tab-panel">
+        <div class="kpi-grid" aria-label="Fleet security overview">
+          <article class="kpi-card">
+            <span class="kpi-label">Enrolled hosts</span>
+            <strong id="kpi-hosts" class="kpi-value">0</strong>
+            <span id="kpi-online" class="kpi-sub">0 online · 0 stale</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Fleet posture score</span>
+            <strong id="kpi-score" class="kpi-value">100%</strong>
+            <span class="kpi-sub">Weighted across active hosts</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Critical / High gaps</span>
+            <strong id="kpi-crit-high" class="kpi-value">0 / 0</strong>
+            <span class="kpi-sub">Open posture failures</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Active alerts</span>
+            <strong id="kpi-alerts" class="kpi-value">0</strong>
+            <span class="kpi-sub">Baseline drift &amp; hunting</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Exposed services</span>
+            <strong id="kpi-surface" class="kpi-value">0</strong>
+            <span class="kpi-sub">Risky DB / AI ports</span>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">FIM tamper alerts</span>
+            <strong id="kpi-fim" class="kpi-value">0</strong>
+            <span class="kpi-sub">SHA-256 config drift</span>
+          </article>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Cross-host risk &amp; zero-day correlation</h2>
+              <p>Issues affecting servers or user machines across your fleet. Fix allowlisted gaps fleet-wide in one click.</p>
+            </div>
+            <div class="btn-row" id="fleet-bulk-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-bulk-action="scan">Scan fleet</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-bulk-action="fim_check">Run FIM check</button>
+              <button type="button" class="btn btn-secondary btn-sm" data-bulk-action="inventory">Refresh Auto-SBOM</button>
+            </div>
+          </div>
+          <div id="correlations-list" class="corr-list"><p class="empty">No open cross-host findings.</p></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Managed fleet hosts</h2>
+              <p>Click any host to inspect checks, exposed AI/DB ports, hunting alerts, or dispatch allowlisted repairs.</p>
+            </div>
+            <div class="filters">
+              <input id="filter-search" type="search" placeholder="Filter hostname…">
+              <select id="filter-tag"><option value="">All tags</option></select>
+              <select id="filter-os">
+                <option value="">All OS</option>
+                <option value="macOS">macOS</option>
+                <option value="Linux">Linux</option>
+                <option value="Windows">Windows</option>
+              </select>
+              <select id="filter-status">
+                <option value="">All statuses</option>
+                <option value="online">Online</option>
+                <option value="stale">Stale</option>
+                <option value="offline">Offline</option>
+                <option value="revoked">Revoked</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Host</th>
+                  <th>Role &amp; Tags</th>
+                  <th>OS</th>
+                  <th>Status</th>
+                  <th>Score</th>
+                  <th>Crit / High</th>
+                  <th>Alerts</th>
+                  <th>FIM</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="hosts-tbody">
+                <tr><td colspan="9" class="empty">No enrolled hosts yet. Create an enrollment token to onboard machines.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Recent fleet commands</h2>
+              <p>Live verification status of allowlisted actions dispatched across the fleet.</p>
+            </div>
+          </div>
+          <div id="commands-list" class="cmd-list"><p class="empty">No commands dispatched yet.</p></div>
+        </section>
+      </section>
+
+      <section id="tab-enroll" class="tab-panel" hidden>
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Enroll servers &amp; employee machines</h2>
+                <p>Mint short-lived tokens with automatic role &amp; tag assignment.</p>
+              </div>
+            </div>
+            <form id="token-form" class="stack-form">
+              <div class="field-row">
+                <div class="field">
+                  <label for="tok-label">Label</label>
+                  <input id="tok-label" type="text" placeholder="prod-linux-servers" required>
+                </div>
+                <div class="field">
+                  <label for="tok-role">Host role</label>
+                  <select id="tok-role">
+                    <option value="server">Server</option>
+                    <option value="workstation">Workstation</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="tok-tags">Default tags (comma-separated)</label>
+                  <input id="tok-tags" type="text" placeholder="prod, web, us-east">
+                </div>
+                <div class="field">
+                  <label for="tok-uses">Max uses</label>
+                  <input id="tok-uses" type="number" min="1" max="10000" value="25">
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Generate enrollment token</button>
+            </form>
+            <div id="enroll-command-box" class="command-box" hidden>
+              <div class="panel-head">
+                <strong>Run on each target host:</strong>
+                <button type="button" id="copy-enroll-btn" class="btn btn-ghost btn-sm">Copy command</button>
+              </div>
+              <pre><code id="enroll-command-text"></code></pre>
+            </div>
+            <div id="tokens-list" class="token-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Core security team (RBAC)</h2>
+                <p>Keep access tight: <code>admin</code> manages team/tokens, <code>responder</code> runs scans &amp; fixes, <code>viewer</code> is read-only.</p>
+              </div>
+            </div>
+            <form id="operator-form" class="stack-form">
+              <div class="field-row">
+                <div class="field">
+                  <label for="op-user">Username</label>
+                  <input id="op-user" type="text" placeholder="secops-lead" required>
+                </div>
+                <div class="field">
+                  <label for="op-role">Role</label>
+                  <select id="op-role">
+                    <option value="responder">Responder</option>
+                    <option value="viewer">Viewer</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label for="op-pass">Initial password (min 8 chars)</label>
+                <input id="op-pass" type="password" minlength="8" required>
+              </div>
+              <button type="submit" class="btn btn-secondary btn-sm">Add core operator</button>
+            </form>
+            <div id="operators-list" class="token-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-audit" class="tab-panel" hidden>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Executive compliance &amp; audit trail</h2>
+              <p>Export a point-in-time fleet posture report for SOC 2, ISO 27001, or leadership reviews.</p>
+            </div>
+            <div class="btn-row">
+              <button type="button" id="open-html-report" class="btn btn-primary btn-sm">Open HTML compliance report</button>
+              <button type="button" id="download-json-report" class="btn btn-secondary btn-sm">Download JSON export</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Timestamp (UTC)</th><th>Actor</th><th>Role</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+              </thead>
+              <tbody id="audit-tbody">
+                <tr><td colspan="6" class="empty">Loading audit entries…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="host-dialog" class="dialog" aria-labelledby="host-dialog-title">
+    <div class="dialog-head">
+      <div>
+        <h2 id="host-dialog-title">Host detail</h2>
+        <p id="host-dialog-meta" class="muted"></p>
+      </div>
+      <button type="button" id="close-host-dialog" class="btn btn-ghost btn-sm">Close</button>
+    </div>
+    <div class="dialog-actions-bar" id="host-dialog-actions"></div>
+    <div id="host-dialog-body" class="dialog-content"></div>
+  </dialog>
+</body>
+</html>

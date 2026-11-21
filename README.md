@@ -33,12 +33,12 @@ To install from the wheel, use Python 3.11 or later and run these commands
 from your downloads folder. [Set up pipx](https://pipx.pypa.io/stable/)
 
 ```console
-pipx install ./wardr-0.3.0-py3-none-any.whl
+pipx install ./wardr-0.3.1-py3-none-any.whl
 wardr
 ```
 
-To upgrade from v0.2.0, close Wardr, download the v0.3.0 wheel, and run
-`pipx install --force ./wardr-0.3.0-py3-none-any.whl` once. Launch Wardr again
+To upgrade from v0.2.0, close Wardr, download the v0.3.1 wheel, and run
+`pipx install --force ./wardr-0.3.1-py3-none-any.whl` once. Launch Wardr again
 as the account whose security settings you want to check.
 
 ## Dashboard
@@ -136,9 +136,32 @@ wardr report-issue --finding ssh-directory-permissions --zero-day --out redacted
 wardr plan --format html > wardr-plan.html
 wardr watch
 wardr service-template --platform systemd
+wardr service-template --platform systemd --fleet
+wardr fleet server --host 127.0.0.1 --port 8443
+wardr fleet enroll --server https://fleet.example.com --token wf_enroll_... --tags prod,linux
+wardr fleet agent --interval 60
 wardr threat-network --host 127.0.0.1 --port 8787
 wardr serve --no-browser --offline
 ```
+
+## Teams & Fleet Management
+
+Small core security teams can self-host **Wardr Fleet** with zero extra
+dependencies (`wardr fleet server`) to monitor and harden servers and user
+computers from one web console:
+
+- **RBAC for core teams**: `admin`, `responder`, and `viewer` roles backed by
+  PBKDF2-SHA256 operator credentials, session tokens, and an immutable SQLite
+  audit log.
+- **Short-lived enrollment tokens**: Mint bounded, revocable tokens with
+  default host roles (`server` / `workstation`) and tags; each host receives a
+  unique hashed device token (`0600` locally) that can be revoked in one click.
+- **Cross-host correlation & zero-RCE bulk fixes**: Automatically correlates
+  shared posture failures, exposed databases/AI ports, FIM tampering, and
+  zero-day baseline-drift alerts across the fleet. Operators can queue strictly
+  allowlisted actions (`scan`, `exposure`, `inventory`, `fim_check`,
+  `apply_fix`, `undo_fix`) across hosts or tag groups—never arbitrary remote
+  scripts—and export executive HTML/JSON compliance reports.
 
 `wardr watch` emits new events as JSON Lines on stdout and coverage updates on
 stderr. Use an existing service supervisor for continuous collection. The
@@ -191,7 +214,7 @@ verifies downloads offline using PyCA cryptography without an OpenSSL
 command. [Release downloads](https://getwardr.com/#release)
 
 ```console
-wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.3.0-py3-none-any.whl
+wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.3.1-py3-none-any.whl
 ```
 
 See the [security policy](SECURITY.md) for private vulnerability reporting and
