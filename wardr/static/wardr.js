@@ -34,6 +34,9 @@ const state = {
   needsLaunch: !token,
   actionNotice: null,
   fixId: null,
+  reportTarget: null,
+  reportDraft: null,
+  pendingIssueReport: false,
   rendered: new Map(),
 };
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -233,13 +236,21 @@ function findingCard(check, open) {
   if (check.remediation && check.status !== "pass") body.append(detailBlock("Recommended action", check.remediation));
   const references = referencesBlock(check.references);
   if (references) body.append(references);
+  const actions = make("div", "finding-actions");
   if (check.can_fix === true && check.status === "fail") {
     const button = make("button", "button button-secondary button-small", "Review fix");
     button.type = "button";
     button.dataset.fix = check.id;
     button.addEventListener("click", () => showFix(check.id));
-    body.append(button);
+    actions.append(button);
   }
+  if (check.status === "fail") {
+    const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
+    reportBtn.type = "button";
+    reportBtn.addEventListener("click", () => openIssueReport("finding", check.id));
+    actions.append(reportBtn);
+  }
+  if (actions.childElementCount) body.append(actions);
   card.append(summary, body);
   return card;
 }
@@ -655,16 +666,31 @@ async function refreshIntel() {
   }
 }
 
-function showFix(id) {
+async function showFix(id) {
   const check = state.data?.scan.checks.find((result) => result.id === id);
   if (!check?.can_fix || check.status !== "fail") return;
   state.fixId = id;
   setText("fix-title", "Apply fix for “" + check.title + "”?");
   setText("fix-effect", check.fix_description || check.remediation || "Wardr will update this security setting on the local device.");
+  const preview = element("fix-preview");
+  preview.replaceChildren();
+  preview.hidden = true;
   element("fix-error").hidden = true;
   renderControls();
   element("fix-dialog").showModal();
   element("cancel-fix").focus();
+  try {
+    const dryRun = await request("/api/fix/preview", { id });
+    if (state.fixId !== id) return;
+    if (Array.isArray(dryRun.changes) && dryRun.changes.length) {
+      preview.replaceChildren(...dryRun.changes.map((c) =>
+        make("li", null, c.target + ": " + c.current_mode + " → " + c.target_mode + " (rollback snapshot saved)")
+      ));
+      preview.hidden = false;
+    }
+  } catch {
+    /* Preview is best-effort; confirmation remains protected server-side. */
+  }
 }
 
 async function confirmFix() {
@@ -715,6 +741,8 @@ function renderDefenseControls() {
   element("exposure-refresh").disabled = !state.connected || collecting;
   setText("exposure-refresh", collecting ? "Collecting…" : "Refresh exposure");
   for (const id of ["software-sbom", "software-osv"]) element(id).disabled = assessing === true;
+  element("software-auto-scan").disabled = !state.connected || assessing === true;
+  setText("software-auto-scan", assessing ? "Scanning…" : "Auto-scan installed software");
   element("software-assess").disabled = !state.connected || assessing
     || !element("software-sbom").files.length || !element("software-osv").files.length;
   setText("software-assess", assessing ? "Assessing…" : "Assess software");
@@ -837,15 +865,23 @@ function renderHunting(hunting) {
   replaceWhenChanged("hunting-sources", hunting.coverage, () => {
     element("hunting-sources").replaceChildren(...hunting.coverage.map(coverageRow));
   });
-  defenseList("hunting", hunting.alerts, (alert) => defenseFinding(
-    alert, alert.title, [capitalized(alert.confidence) + " confidence", humanDate(alert.last_seen)].filter(Boolean).join(" · "),
-    [capitalized(alert.severity), alert.severity], [
-      alert.summary && detailBlock("Why it was flagged", alert.summary),
-      alert.evidence.length && listBlock("Recorded evidence", alert.evidence.map((event) =>
-        [humanDate(event.at), event.source, event.title, event.detail].filter(Boolean).join(" · "))),
-      alert.actions.length && listBlock("Investigate", alert.actions),
-    ],
-  ), "No hunting rules matched the available event history.");
+  defenseList("hunting", hunting.alerts, (alert) => {
+    const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
+    reportBtn.type = "button";
+    reportBtn.addEventListener("click", () => openIssueReport("alert", alert.id));
+    const actionWrap = make("div", "finding-actions");
+    actionWrap.append(reportBtn);
+    return defenseFinding(
+      alert, alert.title, [capitalized(alert.confidence) + " confidence", humanDate(alert.last_seen)].filter(Boolean).join(" · "),
+      [capitalized(alert.severity), alert.severity], [
+        alert.summary && detailBlock("Why it was flagged", alert.summary),
+        alert.evidence.length && listBlock("Recorded evidence", alert.evidence.map((event) =>
+          [humanDate(event.at), event.source, event.title, event.detail].filter(Boolean).join(" · "))),
+        alert.actions.length && listBlock("Investigate", alert.actions),
+        actionWrap,
+      ],
+    );
+  }, "No hunting rules matched the available event history.");
 }
 
 function renderSoftware(software) {
@@ -1049,8 +1085,107 @@ for (const name of Object.keys(state.defenseLimits)) {
     renderDefense();
   });
 }
+async function autoScanSoftware() {
+  if (state.pendingSoftware) return;
+  state.pendingSoftware = true;
+  defenseNotice("");
+  renderControls();
+  try {
+    const result = await request("/api/inventory/scan", {});
+    if (defenseRequest) await defenseRequest;
+    state.defenseLimits.software = 12;
+    await refreshDefense(true);
+    const inv = result.inventory || {};
+    defenseNotice("Auto-discovered " + plural(inv.component_count || 0, "installed package")
+      + " (" + (inv.sources?.join(", ") || "local") + ").");
+  } catch (error) {
+    defenseNotice(errorText(error, "Wardr could not auto-scan installed software."), true);
+  } finally {
+    state.pendingSoftware = false;
+    renderControls();
+  }
+}
+
+async function refreshIssuePreview() {
+  if (!state.reportTarget) return;
+  const target = state.reportTarget;
+  element("report-error").hidden = true;
+  element("download-report").disabled = true;
+  element("submit-report").disabled = true;
+  setText("report-preview", "Redacting local identifiers…");
+  try {
+    const draft = await request("/api/report/preview", {
+      kind: target.kind,
+      id: target.id,
+      notes: element("report-notes").value || "",
+      suspected_zero_day: element("report-zero-day").checked,
+    });
+    if (state.reportTarget !== target) return;
+    state.reportDraft = draft;
+    setText("report-redactions", plural(draft.redaction_total || 0, "local identifier")
+      + " automatically stripped · Fingerprint " + draft.payload.fingerprint);
+    setText("report-preview", JSON.stringify(draft.payload, null, 2));
+    element("download-report").disabled = false;
+    element("submit-report").disabled = state.data?.offline === true || state.pendingIssueReport;
+  } catch (error) {
+    setText("report-error", errorText(error, "Could not build the redacted report preview."));
+    element("report-error").hidden = false;
+    setText("report-preview", "");
+  }
+}
+
+function openIssueReport(kind, id) {
+  state.reportTarget = { kind, id };
+  state.reportDraft = null;
+  element("report-zero-day").checked = kind === "alert";
+  element("report-notes").value = "";
+  element("report-error").hidden = true;
+  setText("report-redactions", "");
+  element("report-dialog").showModal();
+  refreshIssuePreview();
+}
+
+function downloadIssueReport() {
+  if (!state.reportDraft?.payload) return;
+  const blob = new Blob([JSON.stringify(state.reportDraft.payload, null, 2) + "\n"], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = make("a");
+  link.href = url;
+  link.download = "wardr-sanitized-report-" + state.reportDraft.payload.fingerprint.slice(0, 12) + ".json";
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function submitIssueReport() {
+  if (!state.reportDraft?.payload || state.pendingIssueReport) return;
+  state.pendingIssueReport = true;
+  element("report-error").hidden = true;
+  element("submit-report").disabled = true;
+  setText("submit-report", "Submitting…");
+  try {
+    const result = await request("/api/report/submit", { payload: state.reportDraft.payload });
+    element("report-dialog").close();
+    state.actionNotice = { error: false, text: "Sanitized report submitted (Case " + (result.receipt?.case_id || "recorded") + ")." };
+    renderNotice();
+  } catch (error) {
+    setText("report-error", errorText(error, "Could not reach Wardr central intake. You can download the redacted JSON instead."));
+    element("report-error").hidden = false;
+  } finally {
+    state.pendingIssueReport = false;
+    setText("submit-report", "Submit to Wardr");
+    element("submit-report").disabled = !state.reportDraft?.payload || state.data?.offline === true;
+  }
+}
+
 element("exposure-refresh").addEventListener("click", collectExposure);
+element("software-auto-scan").addEventListener("click", autoScanSoftware);
 element("software-form").addEventListener("submit", assessSoftware);
+element("cancel-report").addEventListener("click", () => element("report-dialog").close());
+element("download-report").addEventListener("click", downloadIssueReport);
+element("submit-report").addEventListener("click", submitIssueReport);
+element("report-zero-day").addEventListener("change", refreshIssuePreview);
+element("report-notes").addEventListener("change", refreshIssuePreview);
+element("report-dialog").addEventListener("close", () => { state.reportTarget = null; state.reportDraft = null; });
 for (const id of ["software-sbom", "software-osv"]) element(id).addEventListener("change", renderControls);
 element("local-model-check").addEventListener("click", () => runModelAction(false));
 element("local-model-review").addEventListener("click", () => runModelAction(true));

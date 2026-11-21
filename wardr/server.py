@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import local_ai, updater
+from . import feeds, local_ai, reporting, updater
 from .plan import html_plan
 from .report import REPORT_CSS, html_report, json_report, report_data
 from .state import BusyError, WardrState
@@ -107,7 +107,10 @@ class DashboardRequest(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"error": "Invalid request path."})
             return
         path = url.path
-        if path in ("/api/status", "/api/defense", "/api/local-ai", "/api/update", *REPORTS) and not self._access_granted():
+        if path in (
+            "/api/status", "/api/defense", "/api/local-ai", "/api/update",
+            "/api/remediation", "/api/feed", *REPORTS,
+        ) and not self._access_granted():
             self._json(HTTPStatus.FORBIDDEN, {"error": "Open the launch link printed by Wardr to access this dashboard."})
             return
         if path == "/":
@@ -120,6 +123,10 @@ class DashboardRequest(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, local_ai.status())
         elif path == "/api/update":
             self._json(HTTPStatus.OK, self.server.updates.status())
+        elif path == "/api/remediation":
+            self._json(HTTPStatus.OK, {"history": self.server.state.remediation_history()})
+        elif path == "/api/feed":
+            self._json(HTTPStatus.OK, self.server.state.feed_status())
         elif path in REPORTS:
             self._report(path, url.query == "download=1")
         elif path in self.server.assets:
@@ -162,7 +169,12 @@ class DashboardRequest(BaseHTTPRequestHandler):
             self._json(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, {"error": "Send a JSON request."})
             return
         lengths = self.headers.get_all("Content-Length") or []
-        maximum = ASSESSMENT_UPLOAD_LIMIT if self.path == "/api/software/assess" else 2048
+        maximum = (
+            ASSESSMENT_UPLOAD_LIMIT if self.path == "/api/software/assess" else
+            48 * 1024 if self.path == "/api/report/submit" else
+            8192 if self.path == "/api/report/preview" else
+            2048
+        )
         if (
             len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal()
             or len(lengths[0]) > len(str(maximum)) or "Transfer-Encoding" in self.headers
@@ -213,11 +225,46 @@ class DashboardRequest(BaseHTTPRequestHandler):
                 if not isinstance(identifier, str) or len(identifier) > 120 or body.keys() != {"id"}:
                     raise ValueError("Choose an applicable fix from the checklist.")
                 self._json(HTTPStatus.OK, self.server.state.apply_fix(identifier))
+            elif self.path == "/api/fix/preview":
+                identifier = body.get("id")
+                if not isinstance(identifier, str) or len(identifier) > 120 or body.keys() != {"id"}:
+                    raise ValueError("Choose an applicable fix to preview.")
+                self._json(HTTPStatus.OK, self.server.state.preview_fix(identifier))
+            elif self.path == "/api/fix/undo":
+                rollback_id = body.get("rollback_id")
+                if not isinstance(rollback_id, str) or len(rollback_id) > 64 or body.keys() != {"rollback_id"}:
+                    raise ValueError("Provide a valid remediation rollback ID.")
+                self._json(HTTPStatus.OK, self.server.state.undo_fix(rollback_id))
+            elif self.path == "/api/inventory/scan" and not body:
+                self._json(HTTPStatus.OK, self.server.state.auto_assess_software())
+            elif self.path == "/api/report/preview":
+                kind = body.get("kind")
+                item_id = body.get("id")
+                notes = body.get("notes", "")
+                zero_day = body.get("suspected_zero_day", False)
+                if (
+                    not body.keys() <= {"kind", "id", "notes", "suspected_zero_day"}
+                    or not isinstance(kind, str)
+                    or not isinstance(item_id, str) or len(item_id) > 160
+                    or not isinstance(notes, str) or len(notes) > 2000
+                    or not isinstance(zero_day, bool)
+                ):
+                    raise ValueError("Provide a valid report kind and item ID.")
+                self._json(
+                    HTTPStatus.OK,
+                    self.server.state.preview_report(kind, item_id, notes=notes, suspected_zero_day=zero_day),
+                )
+            elif self.path == "/api/report/submit":
+                if body.keys() != {"payload"} or not isinstance(body.get("payload"), dict):
+                    raise ValueError("Provide the reviewed redacted report payload.")
+                self._json(HTTPStatus.OK, self.server.state.submit_report(body["payload"]))
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "Action not found."})
         except BusyError as exc:
             self._json(HTTPStatus.CONFLICT, {"error": str(exc)})
         except ValueError as exc:
+            self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+        except (feeds.FeedError, reporting.ReportingError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         except updater.UpdaterError as exc:
             self._json(HTTPStatus.CONFLICT, {"error": str(exc)})

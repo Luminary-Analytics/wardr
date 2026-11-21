@@ -33,12 +33,12 @@ To install from the wheel, use Python 3.11 or later and run these commands
 from your downloads folder. [Set up pipx](https://pipx.pypa.io/stable/)
 
 ```console
-pipx install ./wardr-0.2.4-py3-none-any.whl
+pipx install ./wardr-0.3.0-py3-none-any.whl
 wardr
 ```
 
-To upgrade from v0.2.0, close Wardr, download the v0.2.4 wheel, and run
-`pipx install --force ./wardr-0.2.4-py3-none-any.whl` once. Launch Wardr again
+To upgrade from v0.2.0, close Wardr, download the v0.3.0 wheel, and run
+`pipx install --force ./wardr-0.3.0-py3-none-any.whl` once. Launch Wardr again
 as the account whose security settings you want to check.
 
 ## Dashboard
@@ -46,21 +46,28 @@ as the account whose security settings you want to check.
 Wardr prints a private loopback launch link. It scans on startup and hourly
 while the dashboard service runs. Select **Run scan** for an immediate refresh.
 
-- **Checklist** shows the risk, evidence, and next step for each check.
-  Supported SSH permission changes on macOS and Linux require confirmation
-  and are checked again after they run.
+- **Checklist** shows the risk, evidence, and next step for each check,
+  including OS hardening, local credential permissions (`~/.ssh`, `~/.aws`,
+  `~/.kube`, `~/.gnupg`, `~/.docker`), and local AI/MCP security hygiene.
+  Supported permission repairs on macOS and Linux show a dry-run diff preview,
+  save an atomic rollback snapshot, and verify automatically after applying.
+  Any failed finding also offers **Report to Wardr**, which strips hostnames,
+  usernames, home paths, IPs, emails, and secrets locally before previewing
+  the redacted report for optional submission or offline JSON export.
 - **Defense** brings together a prioritized plan, local TCP listeners and UDP
-  bindings, recent telemetry correlations, and software version matches.
-  Socket bindings show local interface scope. Reachability depends on your
-  host firewall and network configuration.
-- **Software** accepts a CycloneDX JSON inventory and an OSV JSON advisory
-  export. Wardr matches supported package identities and version ranges.
-  Unassessed ranges and packages without supplied records appear as gaps.
-  CISA catalog membership increases priority for an existing version match.
+  bindings, attack-surface warnings for exposed databases and local AI
+  endpoints, persistent baseline-drift and Ed25519-signed Rapid-Defense Feed
+  hunting rules, and software version matches.
+- **Software** supports one-click **Auto-scan installed software** (fast,
+  incremental CycloneDX discovery for Python, Homebrew, Debian/Ubuntu, and
+  Alpine matched against verified Rapid-Defense Feed advisories) as well as
+  manual CycloneDX JSON + OSV JSON uploads. CISA catalog membership increases
+  priority for an existing version match.
   [CycloneDX](https://cyclonedx.org/specification/overview/) · [OSV schema](https://ossf.github.io/osv-schema/)
-- **Events** shows the monitor's available sources and recent activity. Hunting
-  alerts link to specific events and offer steps for investigating. Treat
-  correlated events as investigation leads.
+- **Events** shows the monitor's available sources, persistent host baseline
+  drift, and up to 2,000 retained local observations. Hunting alerts link to
+  specific events, support declarative signed feed rules, and offer one-click
+  redacted **Report to Wardr** escalation.
 - **Reports** and **Defense** export HTML and JSON. Exports can contain the
   machine name, software versions, bindings, and event details.
 
@@ -118,9 +125,18 @@ runtime configuration, disable Ollama's cloud features in Ollama.
 ```console
 wardr scan
 wardr exposure
+wardr surface
+wardr inventory
+wardr fim --init && wardr fim
+wardr assess --auto
 wardr assess --sbom inventory.json --advisories advisories.json
+wardr fix --preview aws-credentials-permissions
+wardr feed --import-bundle defense-v1.json --signature defense-v1.json.sig
+wardr report-issue --finding ssh-directory-permissions --zero-day --out redacted.json
 wardr plan --format html > wardr-plan.html
 wardr watch
+wardr service-template --platform systemd
+wardr threat-network --host 127.0.0.1 --port 8787
 wardr serve --no-browser --offline
 ```
 
@@ -175,7 +191,7 @@ verifies downloads offline using PyCA cryptography without an OpenSSL
 command. [Release downloads](https://getwardr.com/#release)
 
 ```console
-wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.2.4-py3-none-any.whl
+wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.3.0-py3-none-any.whl
 ```
 
 See the [security policy](SECURITY.md) for private vulnerability reporting and

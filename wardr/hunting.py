@@ -10,7 +10,7 @@ from itertools import groupby
 
 
 _LOOKBACK_HOURS = 24
-_MAX_EVENTS = 180
+_MAX_EVENTS = 2000
 _MAX_ALERTS = 40
 _AUTH_WINDOW = timedelta(minutes=5)
 _AUTH_MINIMUM = 6
@@ -28,7 +28,7 @@ _WINDOWS_CHANGES = {
 }
 _LISTENER_SIGNAL = ("TCP listeners", "New non-loopback TCP listener")
 _LISTENER_ADDRESS = re.compile(r"^A local service began listening on (?:\[[^\]]+\]|[^:]+):([0-9]{1,5})\.")
-_SEVERITY = {"high": 2, "medium": 1, "low": 0}
+_SEVERITY = {"critical": 3, "high": 2, "medium": 1, "low": 0}
 
 
 @dataclass(frozen=True)
@@ -123,11 +123,11 @@ def _repeated_events(
 
 def _alert(
     rule_id: str, title: str, severity: str, confidence: str, summary: str,
-    events: list[_Event], actions: list[str],
+    events: list[_Event], actions: list[str], *, mitigation_id: str | None = None,
 ) -> dict:
     first, last = events[0], events[-1]
     identity = sha256(f"{rule_id}/{first.id}".encode()).hexdigest()[:24]
-    return {
+    alert = {
         "id": identity,
         "rule_id": rule_id,
         "title": title,
@@ -140,6 +140,9 @@ def _alert(
         "evidence": [event.evidence() for event in events],
         "actions": actions,
     }
+    if mitigation_id:
+        alert["mitigation_id"] = mitigation_id
+    return alert
 
 
 def _authentication_alerts(events: list[_Event]) -> Iterator[dict]:
@@ -286,7 +289,101 @@ def _windows_alerts(events: list[_Event]) -> Iterator[dict]:
             )
 
 
-def analyze(status: dict, *, now: datetime | None = None) -> dict:
+def _matches_feed_predicate(event: _Event, predicate: dict) -> bool:
+    source = predicate.get("source")
+    if source and event.source != source:
+        return False
+    title_tokens = predicate.get("title_contains") or ()
+    if title_tokens:
+        lowered_title = event.title.lower()
+        if not all(token.lower() in lowered_title for token in title_tokens):
+            return False
+    detail_tokens = predicate.get("detail_contains") or ()
+    if detail_tokens:
+        lowered_detail = event.detail.lower()
+        if not all(token.lower() in lowered_detail for token in detail_tokens):
+            return False
+    return True
+
+
+def _baseline_drift_alerts(events: list[_Event]) -> Iterator[dict]:
+    drift_titles = {
+        "Novel non-loopback TCP listener (baseline drift)": (
+            "baseline-drift-listener",
+            "Novel non-loopback listener outside host baseline",
+            "high",
+            "A service began listening on a non-loopback endpoint that has never been seen in this host's persistent baseline. "
+            "Unexpected listeners can indicate unauthorized services or early zero-day exploitation.",
+            [
+                "Verify the owning process and binary hash in Defense → Exposure.",
+                "Confirm whether this listener corresponds to a planned deployment or update.",
+                "If unexpected, isolate the host or port and consider using Report to Wardr to share sanitized indicators.",
+            ],
+        ),
+        "Novel launch item (baseline drift)": (
+            "baseline-drift-launch",
+            "Novel persistence item outside host baseline",
+            "high",
+            "A launch agent or daemon appeared that was not present in this host's persistent baseline. "
+            "Unexpected persistence items warrant immediate review.",
+            [
+                "Inspect the launch configuration and confirm the target binary is signed and expected.",
+                "Compare the creation time against recent approved software installations.",
+                "If unauthorized, remove the persistence item and report sanitized indicators to Wardr.",
+            ],
+        ),
+    }
+    for event in events:
+        spec = drift_titles.get(event.title)
+        if spec is None:
+            continue
+        rule_id, title, severity, summary, actions = spec
+        yield _alert(rule_id, title, severity, "medium", summary, [event], actions)
+
+
+def _feed_rule_alerts(events: list[_Event], feed_rules: list[dict] | None) -> Iterator[dict]:
+    if not feed_rules:
+        return
+    for rule in feed_rules[:250]:
+        if not isinstance(rule, dict):
+            continue
+        match = rule.get("match")
+        if not isinstance(match, dict):
+            continue
+        matched = [event for event in events if _matches_feed_predicate(event, match)]
+        if not matched:
+            continue
+        kind = match.get("kind")
+        mitigation = rule.get("mitigation_id")
+        if kind == "event":
+            for event in matched[:10]:
+                yield _alert(
+                    f"feed/{rule['id']}",
+                    rule["title"],
+                    rule["severity"],
+                    rule.get("confidence", "medium"),
+                    rule["summary"],
+                    [event],
+                    list(rule.get("actions", ())),
+                    mitigation_id=mitigation,
+                )
+        elif kind == "burst":
+            minimum = match.get("minimum", 2)
+            window = timedelta(seconds=match.get("window_seconds", 300))
+            for group, _count in _repeated_events(matched, minimum, window, lambda event: event.id):
+                yield _alert(
+                    f"feed/{rule['id']}",
+                    rule["title"],
+                    rule["severity"],
+                    rule.get("confidence", "medium"),
+                    rule["summary"],
+                    group,
+                    list(rule.get("actions", ())),
+                    mitigation_id=mitigation,
+                )
+
+
+def analyze(status: dict, *, now: datetime | None = None, feed_rules: list[dict] | None = None) -> dict:
     """Summarize recent, locally observed signals for investigation."""
     if now is None:
         now = datetime.now(timezone.utc)
@@ -297,14 +394,21 @@ def analyze(status: dict, *, now: datetime | None = None) -> dict:
     events = _events(raw_events if isinstance(raw_events, list) else [], now)
     raw_coverage = status.get("coverage")
     coverage, state, note = _coverage(raw_coverage if isinstance(raw_coverage, list) else [], status.get("last_poll"), events)
-    alerts = [*_authentication_alerts(events), *_exposure_alerts(events), *_windows_alerts(events)]
+    alerts = [
+        *_authentication_alerts(events),
+        *_exposure_alerts(events),
+        *_windows_alerts(events),
+        *_baseline_drift_alerts(events),
+        *_feed_rule_alerts(events, feed_rules),
+    ]
     alerts.sort(
-        key=lambda item: (_SEVERITY[item["severity"]], datetime.fromisoformat(item["last_seen"]), item["id"]),
+        key=lambda item: (_SEVERITY.get(item["severity"], 0), datetime.fromisoformat(item["last_seen"]), item["id"]),
         reverse=True,
     )
     return {
         "lookback_hours": _LOOKBACK_HOURS,
         "events_considered": len(events),
+        "feed_rules_active": len(feed_rules) if feed_rules else 0,
         "coverage": coverage,
         "coverage_state": state,
         "coverage_note": note,

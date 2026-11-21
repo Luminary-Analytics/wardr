@@ -428,6 +428,13 @@ h1, h2, h3 { color: var(--ink); }
   .navigation a { padding-inline: 2px; }
   .navigation .icon { display: none; }
 }
+.finding-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.report-preview {
+  max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-subtle, #f4f6f8); font-size: .78rem; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border, #dde2e8);
+}
+#report-notes { width: 100%; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border, #dde2e8); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

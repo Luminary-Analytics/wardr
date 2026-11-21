@@ -322,6 +322,9 @@ def apply_fix(check_id):
         return _repair_ssh_directory()
     if check_id in _SSH_FILE_CHECKS:
         return _repair_ssh_files(check_id)
+    from . import remediation
+    if check_id in remediation.ALL_FIX_IDS:
+        return remediation.apply_fix(check_id)
     return {"ok": False, "message": "No automatic fix is available for this check and account."}
 
 
@@ -805,9 +808,11 @@ def _linux_patches():
 
 def scan():
     """Return a JSON-compatible, timestamped snapshot of this host."""
+    from . import inventory, remediation
+
     system = platform.system()
     if system == "Darwin":
-        checks = _macos_checks() + _unix_ssh_checks()
+        checks = _macos_checks() + _unix_ssh_checks() + remediation.credential_checks()
         os_version = platform.mac_ver()[0]
     elif system == "Windows":
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -820,11 +825,13 @@ def scan():
             pending = pool.submit(_linux_patches)
             checks = [
                 _linux_firewall(), _linux_aslr(), _linux_link_protections(),
-                _linux_mandatory_access(), _linux_ssh_root(), *_unix_ssh_checks(), pending.result(),
+                _linux_mandatory_access(), _linux_ssh_root(), *_unix_ssh_checks(),
+                *remediation.credential_checks(), pending.result(),
             ]
         os_version = platform.release()
     else:
         os_version, checks = platform.release(), []
+    checks.extend(inventory.scan_ai_surface())
     return {
         "platform": {"Darwin": "macOS"}.get(system, system),
         "os_version": os_version,

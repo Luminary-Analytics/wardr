@@ -178,7 +178,8 @@
           </div>
           <div class="card" id="defense-software" role="tabpanel" aria-labelledby="defense-tab-software" tabindex="0" hidden>
             <div class="section-heading defense-heading">
-              <div><h2>Software advisory matching</h2><p>Compare the package versions in an inventory with an imported OSV advisory export.</p></div>
+              <div><h2>Software advisory matching</h2><p>Auto-discover installed packages or compare a CycloneDX inventory with OSV advisories.</p></div>
+              <button type="button" id="software-auto-scan" class="button button-secondary button-small" disabled>Auto-scan installed software</button>
             </div>
             <form id="software-form" class="software-form">
               <div class="software-file"><label for="software-sbom">CycloneDX inventory</label><input type="file" id="software-sbom" aria-describedby="software-input-note" accept=".json,application/json" required></div>
@@ -245,10 +246,30 @@
       <div class="card-icon"><span class="icon icon-check" aria-hidden="true"></span></div>
       <h2 id="fix-title">Apply this fix?</h2>
       <p id="fix-effect"></p>
+      <ul id="fix-preview" class="reference-list" hidden></ul>
       <p class="dialog-error" id="fix-error" role="status" hidden></p>
       <div class="dialog-actions">
         <button class="button button-secondary" type="button" id="cancel-fix">Cancel</button>
         <button class="button button-primary" type="button" id="confirm-fix">Apply fix</button>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="dialog updates-dialog" id="report-dialog" aria-labelledby="report-title">
+    <div class="dialog-body">
+      <h2 id="report-title">Report to Wardr</h2>
+      <p id="report-subtitle">Review the exact redacted payload before sharing. Hostnames, usernames, home paths, IPs, emails, and secrets are stripped locally.</p>
+      <p id="report-redactions" class="defense-caption" role="status"></p>
+      <label class="field"><input type="checkbox" id="report-zero-day"> Flag as suspected zero-day or novel vulnerability</label>
+      <div class="field">
+        <label for="report-notes">Optional notes (also automatically redacted)</label>
+        <textarea id="report-notes" rows="2" maxlength="1000"></textarea>
+      </div>
+      <pre id="report-preview" class="report-preview"></pre>
+      <p class="dialog-error" id="report-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="cancel-report">Close</button>
+        <button class="button button-secondary" type="button" id="download-report" disabled>Download JSON</button>
+        <button class="button button-primary" type="button" id="submit-report" disabled>Submit to Wardr</button>
       </div>
     </div>
   </dialog>

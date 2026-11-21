@@ -11,7 +11,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import assessment, checks, exposure, hunting, intel, local_ai
+from . import assessment, checks, exposure, feeds, hunting, intel, inventory, local_ai, remediation, reporting
 from .monitor import Monitor
 from .plan import build_plan, prioritize_software
 from .report import SEVERITIES
@@ -189,7 +189,8 @@ class WardrState:
             software = self._software
             matching = self._software_running
             catalog = self._advisories
-        hunting_result = hunting.analyze(self.monitor.status())
+        feed_rules = feeds.load_feed_rules(self.directory)
+        hunting_result = hunting.analyze(self.monitor.status(), feed_rules=feed_rules)
         prioritized = prioritize_software(software, catalog)
         return {
             "exposure": {
@@ -200,6 +201,8 @@ class WardrState:
                 "running": matching, "result": prioritized,
                 "catalog_coverage": intel.exploited_index(catalog)[1],
             },
+            "feed": feeds.feed_status(self.directory),
+            "remediation_history": remediation.list_history(self.directory),
             "plan": build_plan(self.host, scan, local_exposure, hunting_result, prioritized),
         }
 
@@ -294,7 +297,10 @@ class WardrState:
             self._fix_running = True
         try:
             try:
-                result = checks.apply_fix(identifier)
+                if identifier in remediation.ALL_FIX_IDS:
+                    result = remediation.apply_fix(identifier, state_dir=self.directory)
+                else:
+                    result = checks.apply_fix(identifier)
             except Exception:
                 return {"ok": False, "message": "The fix stopped unexpectedly. Run a new scan to verify the setting."}
             verified = result.get("check")
@@ -312,6 +318,96 @@ class WardrState:
         finally:
             with self._lock:
                 self._fix_running = False
+
+    def preview_fix(self, identifier: str) -> dict:
+        return remediation.preview_fix(identifier)
+
+    def undo_fix(self, rollback_id: str) -> dict:
+        with self._lock:
+            if self._scan_running or self._fix_running:
+                raise BusyError("A scan or fix is already running.")
+            snapshot = self._scan or {}
+            items = snapshot.get("checks", [])
+            self._fix_running = True
+        try:
+            result = remediation.undo_fix(rollback_id, self.directory)
+            verified = result.get("check")
+            if isinstance(verified, dict) and verified.get("id"):
+                check_id = verified["id"]
+                verified = {**verified, "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                updated = {**snapshot, "checks": [verified if item["id"] == check_id else item for item in items]}
+                result = {**result, "check": verified}
+                with self._lock:
+                    self._scan = updated
+                try:
+                    save_local_json(self.scan_path, updated)
+                except OSError:
+                    pass
+            return result
+        finally:
+            with self._lock:
+                self._fix_running = False
+
+    def remediation_history(self) -> list[dict]:
+        return remediation.list_history(self.directory)
+
+    def auto_assess_software(self) -> dict:
+        with self._lock:
+            if self._software_running:
+                raise BusyError("A software assessment is already running.")
+            self._software_running = True
+            index, _ = intel.exploited_index(self._advisories)
+        try:
+            collected = inventory.collect_inventory(self.directory)
+            feed_advisories = feeds.load_feed_advisories(self.directory)
+            result = assessment.assess_documents(
+                collected["sbom"],
+                feed_advisories,
+                exploited_ids=index,
+            )
+            save_local_json(self.software_path, result)
+            with self._lock:
+                self._software = result
+                catalog = self._advisories
+            return {
+                "inventory": {
+                    "collected_at": collected["collected_at"],
+                    "cached": collected["cached"],
+                    "component_count": collected["component_count"],
+                    "sources": collected["sources"],
+                    "feed_advisories_used": len(feed_advisories),
+                },
+                "assessment": prioritize_software(result, catalog),
+            }
+        finally:
+            with self._lock:
+                self._software_running = False
+
+    def feed_status(self) -> dict:
+        return feeds.feed_status(self.directory)
+
+    def preview_report(self, kind: str, item_id: str, *, notes: str = "", suspected_zero_day: bool = False) -> dict:
+        source_item = None
+        if kind == "finding":
+            snapshot = self.scan_snapshot() or {}
+            source_item = next((c for c in snapshot.get("checks", ()) if c.get("id") == item_id), None)
+        elif kind == "alert":
+            defense = self.defense_status()
+            source_item = next((a for a in defense["hunting"].get("alerts", ()) if a.get("id") == item_id), None)
+        elif kind == "software":
+            defense = self.defense_status()
+            sw = (defense["software"].get("result") or {}).get("findings", ())
+            source_item = next((f for f in sw if f.get("id") == item_id), None)
+        elif kind == "custom":
+            source_item = {"id": item_id or "custom", "title": item_id or "Suspected vulnerability"}
+        if source_item is None:
+            raise ValueError("The selected item is no longer present in the latest local state.")
+        return reporting.build_report(
+            kind, source_item, host=self.host, notes=notes, suspected_zero_day=suspected_zero_day,
+        )
+
+    def submit_report(self, payload: dict) -> dict:
+        return reporting.submit_report(payload, state_dir=self.directory, offline=self.offline)
 
     def start_advisory_refresh(self) -> None:
         if self.offline:

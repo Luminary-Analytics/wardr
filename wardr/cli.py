@@ -10,7 +10,10 @@ import sys
 import time
 from pathlib import Path
 
-from . import assessment, checks, exposure, hunting, intel, local_ai, updater
+from . import (
+    assessment, checks, exposure, feeds, fim, hunting, intel, inventory,
+    local_ai, remediation, reporting, service, surface, threat_network, updater,
+)
 from .monitor import Monitor
 from .plan import build_plan, html_plan, prioritize_software, text_plan
 from .release import ReleaseError, verify_release
@@ -54,9 +57,56 @@ def _parser() -> argparse.ArgumentParser:
     advisories = commands.add_parser("advisories", help="Read the local CISA catalog summary.")
     advisories.add_argument("--refresh", action="store_true", help="Download the public CISA catalog.")
     commands.add_parser("exposure", help="Read local TCP listeners and UDP bindings as JSON.")
-    software = commands.add_parser("assess", help="Match a CycloneDX inventory to locally supplied OSV advisories.")
-    software.add_argument("--sbom", type=Path, required=True, help="A CycloneDX JSON file.")
-    software.add_argument("--advisories", type=Path, nargs="+", required=True, help="One or more OSV JSON files.")
+    inv = commands.add_parser("inventory", help="Collect an incremental local software inventory (CycloneDX) and AI surface checks.")
+    inv.add_argument("--format", choices=("summary", "cyclonedx"), default="summary")
+    inv.add_argument("--force", action="store_true", help="Bypass the incremental cache and rescan installed packages.")
+
+    software = commands.add_parser("assess", help="Match a local or auto-discovered CycloneDX inventory to OSV and signed feed advisories.")
+    sbom_source = software.add_mutually_exclusive_group(required=True)
+    sbom_source.add_argument("--sbom", type=Path, help="A CycloneDX JSON file.")
+    sbom_source.add_argument("--auto", action="store_true", help="Automatically discover installed local software.")
+    software.add_argument("--advisories", type=Path, nargs="+", default=None, help="One or more local OSV JSON files.")
+
+    feed_cmd = commands.add_parser("feed", help="Inspect, verify, sign, import, or refresh Ed25519-signed Rapid-Defense Feeds.")
+    feed_cmd.add_argument("--refresh", action="store_true", help="Download and verify the latest signed defense feed.")
+    feed_cmd.add_argument("--import-bundle", type=Path, help="Verify and install a local signed feed bundle.")
+    feed_cmd.add_argument("--signature", type=Path, help="Detached Ed25519 signature file for --import-bundle or --sign.")
+    feed_cmd.add_argument("--public-key", type=Path, help="Optional trusted Ed25519 PEM public key.")
+    feed_cmd.add_argument("--sign", type=Path, help="Validate and Ed25519-sign a declarative Rapid-Defense Feed bundle.")
+    feed_cmd.add_argument("--signing-key", type=Path, help="Ed25519 private key PEM file for --sign.")
+
+    fim_cmd = commands.add_parser("fim", help="Initialize or verify SHA-256 integrity of critical security config files.")
+    fim_cmd.add_argument("--init", action="store_true", help="Capture and save a fresh integrity baseline.")
+
+    surface_cmd = commands.add_parser("surface", help="Run a non-destructive local attack-surface and loopback TLS hygiene audit.")
+    surface_cmd.add_argument("--no-tls-probe", action="store_true", help="Skip loopback TLS certificate checks.")
+
+    svc_cmd = commands.add_parser("service-template", help="Generate a hardened continuous monitoring service template.")
+    svc_cmd.add_argument("--platform", choices=("systemd", "launchd", "windows"), required=True)
+    svc_cmd.add_argument("--interval", type=lambda value: _integer(value, 5, 3600), default=30)
+
+    tn_cmd = commands.add_parser("threat-network", help="Run the self-hostable central intake, zero-day clustering, and signed feed server.")
+    tn_cmd.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1).")
+    tn_cmd.add_argument("--port", type=lambda value: _integer(value, 0, 65535), default=8787)
+    tn_cmd.add_argument("--signing-key", type=Path, help="Optional Ed25519 private key PEM file for /v1/feeds/publish.")
+    tn_cmd.add_argument("--admin-token", default=None, help="Optional operator Bearer token (generated automatically if omitted).")
+
+    fix_cmd = commands.add_parser("fix", help="Preview, apply, or roll back allowlisted local security remediations.")
+    fix_action = fix_cmd.add_mutually_exclusive_group(required=True)
+    fix_action.add_argument("--preview", metavar="CHECK_ID", help="Show exact changes before applying a fix.")
+    fix_action.add_argument("--apply", metavar="CHECK_ID", help="Apply an allowlisted fix and record a rollback snapshot.")
+    fix_action.add_argument("--undo", metavar="ROLLBACK_ID", help="Restore prior permissions from a remediation rollback ID.")
+    fix_action.add_argument("--history", action="store_true", help="Show recent remediation history and rollback IDs.")
+
+    report_cmd = commands.add_parser("report-issue", help="Build, export, or submit a strictly redacted vulnerability/zero-day report.")
+    report_target = report_cmd.add_mutually_exclusive_group(required=True)
+    report_target.add_argument("--finding", metavar="CHECK_ID", help="Build a redacted report from a check ID in the latest scan.")
+    report_target.add_argument("--alert", metavar="ALERT_ID", help="Build a redacted report from a hunting alert ID.")
+    report_target.add_argument("--custom", metavar="TITLE", help="Build a redacted custom vulnerability/zero-day report.")
+    report_cmd.add_argument("--notes", default="", help="Optional operator notes (also automatically redacted).")
+    report_cmd.add_argument("--zero-day", action="store_true", help="Flag this report as a suspected zero-day / novel vulnerability.")
+    report_cmd.add_argument("--out", type=Path, help="Export the redacted JSON report to a local file.")
+    report_cmd.add_argument("--submit", action="store_true", help="Submit the redacted report over HTTPS to Wardr central intake.")
     plan = commands.add_parser("plan", help="Build a prioritized plan from local checks, telemetry, and saved software matches.")
     plan.add_argument("--format", choices=("text", "json", "html"), default="text")
     model = commands.add_parser("model", help="Prepare or use the optional local model.")
@@ -99,12 +149,12 @@ def _interrupt(_signum, _frame) -> None:
 def _collect_plan(directory: Path) -> dict:
     scan = checks.scan()
     save_local_json(directory / "latest-scan.json", scan)
-    inventory = exposure.collect_exposure()
-    events = hunting.analyze(Monitor(state_dir=directory).poll())
+    local_exposure = exposure.collect_exposure()
+    events = hunting.analyze(Monitor(state_dir=directory).poll(), feed_rules=feeds.load_feed_rules(directory))
     software = prioritize_software(
         read_software(directory / "software-assessment.json"), intel.advisory_status(directory),
     )
-    return build_plan(host_info(), scan, inventory, events, software)
+    return build_plan(host_info(), scan, local_exposure, events, software)
 
 
 def _relaunch_dashboard(arguments: list[str]) -> int:
@@ -177,12 +227,100 @@ def main(argv: list[str] | None = None) -> int:
             print(json_report(intel.public_status(get_catalog(directory))), end="")
         elif args.command == "exposure":
             print(json_report(exposure.collect_exposure()), end="")
+        elif args.command == "inventory":
+            collected = inventory.collect_inventory(directory, force=args.force)
+            if args.format == "cyclonedx":
+                print(json_report(collected["sbom"]), end="")
+            else:
+                ai_checks = inventory.scan_ai_surface(exposure_result=exposure.collect_exposure())
+                summary = {
+                    "collected_at": collected["collected_at"],
+                    "cached": collected["cached"],
+                    "component_count": collected["component_count"],
+                    "sources": collected["sources"],
+                    "ai_surface_checks": ai_checks,
+                }
+                print(json_report(summary), end="")
         elif args.command == "assess":
             catalog = intel.advisory_status(directory)
             index, _ = intel.exploited_index(catalog)
-            result = assessment.assess(args.sbom, args.advisories, exploited_ids=index)
+            if args.auto:
+                collected = inventory.collect_inventory(directory)
+                advisories_list = list(feeds.load_feed_advisories(directory))
+                if args.advisories:
+                    for adv_path in args.advisories:
+                        loaded, _ = assessment._load_document(adv_path, assessment._MAX_FILE_BYTES)
+                        advisories_list.extend(assessment._record_list(loaded))
+                result = assessment.assess_documents(collected["sbom"], advisories_list, exploited_ids=index)
+            else:
+                if not args.advisories:
+                    raise assessment.AssessmentError("Provide --advisories or use --auto with an installed Rapid-Defense Feed.")
+                result = assessment.assess(args.sbom, args.advisories, exploited_ids=index)
             save_local_json(directory / "software-assessment.json", result)
             print(json_report(prioritize_software(result, catalog)), end="")
+        elif args.command == "feed":
+            if args.sign:
+                if not args.signing_key or not args.signature:
+                    raise feeds.FeedError("Provide --signing-key and --signature with --sign.")
+                raw = Path(args.sign).read_bytes()
+                sig = feeds.sign_feed_bytes(raw, Path(args.signing_key).read_bytes())
+                Path(args.signature).write_bytes(sig)
+                result = {"signed": True, "bundle": str(args.sign), "signature": str(args.signature), "bytes": len(raw)}
+            elif args.import_bundle:
+                if not args.signature:
+                    raise feeds.FeedError("Provide --signature with --import-bundle.")
+                result = feeds.import_feed(directory, args.import_bundle, args.signature, args.public_key)
+            elif args.refresh:
+                result = feeds.refresh_feed(directory)
+            else:
+                result = feeds.feed_status(directory)
+            print(json_report(result), end="")
+        elif args.command == "fim":
+            result = fim.init_baseline(directory) if args.init else fim.check_integrity(directory)
+            print(json_report(result), end="")
+        elif args.command == "surface":
+            result = surface.audit_exposure(exposure.collect_exposure(), probe_local_tls=not args.no_tls_probe)
+            print(json_report(result), end="")
+        elif args.command == "service-template":
+            print(service.render_template(args.platform, state_dir=str(args.state_dir) if args.state_dir else "", interval=args.interval), end="")
+        elif args.command == "threat-network":
+            store = threat_network.ThreatNetworkStore(directory / "threat-network")
+            key_bytes = Path(args.signing_key).read_bytes() if args.signing_key else None
+            with threat_network.ThreatNetworkServer(
+                (args.host, args.port), store, admin_token=args.admin_token, signing_key_pem=key_bytes,
+            ) as srv:
+                print(f"Wardr Threat Network listening on http://{args.host}:{srv.server_port}", flush=True)
+                if args.admin_token is None:
+                    print(f"Operator Bearer token: {srv.admin_token}", flush=True)
+                try:
+                    srv.serve_forever()
+                except KeyboardInterrupt:
+                    pass
+        elif args.command == "fix":
+            if args.preview:
+                print(json_report(remediation.preview_fix(args.preview)), end="")
+            elif args.apply:
+                print(json_report(remediation.apply_fix(args.apply, state_dir=directory)), end="")
+            elif args.undo:
+                print(json_report(remediation.undo_fix(args.undo, directory)), end="")
+            else:
+                print(json_report({"history": remediation.list_history(directory)}), end="")
+        elif args.command == "report-issue":
+            state = WardrState(directory, offline=not args.submit)
+            if args.finding:
+                built = state.preview_report("finding", args.finding, notes=args.notes, suspected_zero_day=args.zero_day)
+            elif args.alert:
+                built = state.preview_report("alert", args.alert, notes=args.notes, suspected_zero_day=args.zero_day)
+            else:
+                built = state.preview_report("custom", args.custom, notes=args.notes, suspected_zero_day=args.zero_day)
+            if args.out:
+                out_info = reporting.export_report(built["payload"], args.out)
+                print(json_report({**built, **out_info}), end="")
+            elif args.submit:
+                sub_info = reporting.submit_report(built["payload"], state_dir=directory, offline=False)
+                print(json_report({**built, **sub_info}), end="")
+            else:
+                print(json_report(built), end="")
         elif args.command == "plan":
             render = {"text": text_plan, "json": json_report, "html": html_plan}[args.format]
             print(render(_collect_plan(directory)), end="")
@@ -204,7 +342,10 @@ def main(argv: list[str] | None = None) -> int:
             return _serve_dashboard(directory, args, arguments, windows_launcher)
     except KeyboardInterrupt:
         return 0
-    except (OSError, assessment.AssessmentError, intel.AdvisoryError, local_ai.LocalAIError, ReleaseError, updater.UpdaterError) as exc:
+    except (
+        OSError, ValueError, assessment.AssessmentError, feeds.FeedError,
+        intel.AdvisoryError, local_ai.LocalAIError, ReleaseError, reporting.ReportingError, updater.UpdaterError,
+    ) as exc:
         print(f"Wardr: {exc}", file=sys.stderr)
         return 1
     finally:

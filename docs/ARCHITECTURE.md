@@ -36,10 +36,13 @@ The public site runs separately from the installed product.
 | Area | Implementation | Output |
 | --- | --- | --- |
 | Desktop runtime | `wardr/server.py`, `wardr/state.py`, `wardr/static/` | Dashboard, background work, and local state |
-| Device posture and repair | `wardr/checks.py` | Check ID, status, severity, evidence, risk, next step, and repair eligibility |
-| Local exposure | `wardr/exposure.py` | TCP listeners, UDP bindings, bind scope, ownership where available, and source coverage |
-| Event monitoring and hunting | `wardr/monitor.py`, `wardr/hunting.py` | Retained observations and rule-based alerts with evidence and review steps |
-| Software assessment | `wardr/assessment.py`, `wardr/intel.py` | Version matches and gaps from imported CycloneDX and OSV data, with CISA context |
+| Device posture and repair | `wardr/checks.py`, `wardr/remediation.py` | Check ID, status, severity, evidence, risk, next step, dry-run preview, and rollback-safe allowlisted repairs |
+| Local exposure and surface audit | `wardr/exposure.py`, `wardr/surface.py` | TCP/UDP bindings, bind scope, risky exposed database/AI ports, and loopback TLS checks |
+| Event monitoring, FIM, and hunting | `wardr/monitor.py`, `wardr/fim.py`, `wardr/hunting.py` | Retained observations (up to 2,000), persistent host baselines, SHA-256 config FIM, and built-in + signed declarative hunting alerts |
+| Software & AI surface assessment | `wardr/inventory.py`, `wardr/assessment.py`, `wardr/intel.py` | Incremental CycloneDX auto-discovery, AI/MCP hygiene checks, OSV + Rapid-Defense Feed matching, and CISA KEV context |
+| Signed Rapid-Defense Feeds | `wardr/feeds.py` | Offline/HTTPS Ed25519-verified declarative rules, rapid advisories, and allowlisted mitigation IDs (zero remote code execution) |
+| Sanitized central reporting & Threat Network | `wardr/reporting.py`, `wardr/threat_network.py` | Opt-in client-side PII/secret redaction, preview/export/HTTPS submission, and self-hostable zero-day clustering + signed feed publishing |
+| Continuous server templates | `wardr/service.py` | Hardened `systemd`, `launchd`, and Windows scheduled-task templates for `wardr watch` |
 | Reporting and prioritization | `wardr/report.py`, `wardr/plan.py` | Scan and plan views with text, JSON, and HTML exports |
 | Optional model review | `wardr/local_ai.py` | Suggested groups of existing plan tasks |
 | Release verification | `wardr/release.py` | Ed25519 manifest validation and SHA-256 artifact verification |
@@ -135,7 +138,9 @@ bundled dashboard.
 | `GET /report.html`, `GET /report.json`, `GET /plan.html`, `GET /plan.json` | Render or download current results |
 | `POST /api/scan`, `POST /api/exposure`, `POST /api/intel/refresh` | Start the named refresh |
 | `POST /api/software/assess` | Validate a bounded JSON import and save the computed result |
-| `POST /api/fix` | Apply an eligible repair by check ID |
+| `POST /api/fix`, `POST /api/fix/preview`, `POST /api/fix/undo`, `GET /api/remediation` | Dry-run preview, apply allowlisted repair with rollback snapshot, undo, and view history |
+| `POST /api/inventory/scan`, `GET /api/feed` | Run incremental auto-SBOM assessment and inspect verified Rapid-Defense Feed status |
+| `POST /api/report/preview`, `POST /api/report/submit` | Build client-redacted report preview and optionally submit over HTTPS (disabled in `--offline`) |
 | `GET /api/local-ai`, `POST /api/local-ai/review` | Read model readiness and request an optional review |
 | `GET /api/update`, `POST /api/update/check`, `POST /api/update/install`, `POST /api/update/restart` | Read update status, confirm each release action, and restart the dashboard |
 

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-_HISTORY_SIZE = 180
+_HISTORY_SIZE = 2000
 _HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
@@ -28,6 +28,16 @@ CREATE TABLE IF NOT EXISTS events (
     payload TEXT NOT NULL
 )
 """
+_BASELINE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS baselines (
+    kind TEXT NOT NULL,
+    item TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    PRIMARY KEY (kind, item)
+)
+"""
+_MAX_BASELINE_ITEMS = 4096
 _LOG_LIMIT = 40
 _SNAPSHOT_LIMIT = 8192
 _SSH_FAILURE = re.compile(r"failed password|authentication failure|maximum authentication attempts", re.I)
@@ -112,14 +122,9 @@ def _mac_listeners():
 
 
 def _linux_listeners():
-    command = shutil.which("ss", path="/usr/sbin:/usr/bin:/sbin:/bin")
-    if command:
-        result = _capture_command(command, "-lntH")
-        if result.returncode == 0:
-            listening = (row.split()[3] for row in result.stdout.splitlines() if row.startswith("LISTEN"))
-            return _endpoints(endpoint.replace("[", "", 1).replace("]", "", 1).rsplit(":", 1) for endpoint in listening)
-
+    # Prefer zero-subprocess reads from /proc/net for minimal CPU and memory overhead.
     endpoints = []
+    proc_ok = False
     for path, width in (("/proc/net/tcp", 4), ("/proc/net/tcp6", 16)):
         try:
             with open(path, encoding="ascii") as stream:
@@ -134,10 +139,24 @@ def _linux_listeners():
                         packed = b"".join(int(address[i:i + 8], 16).to_bytes(4, sys.byteorder)
                                           for i in range(0, width * 2, 8))
                         endpoints.append((str(ipaddress.ip_address(packed)), int(port, 16)))
+            if width == 4:
+                proc_ok = True
         except FileNotFoundError:
             if width == 4:
-                raise
-    return _endpoints(endpoints)
+                break
+        except OSError:
+            if width == 4:
+                break
+    if proc_ok:
+        return _endpoints(endpoints)
+
+    command = shutil.which("ss", path="/usr/sbin:/usr/bin:/sbin:/bin")
+    if command:
+        result = _capture_command(command, "-lntH")
+        if result.returncode == 0:
+            listening = (row.split()[3] for row in result.stdout.splitlines() if row.startswith("LISTEN"))
+            return _endpoints(endpoint.replace("[", "", 1).replace("]", "", 1).rsplit(":", 1) for endpoint in listening)
+    raise OSError("Could not read Linux TCP listeners from /proc/net or ss")
 
 
 def _mac_launch_items():
@@ -326,6 +345,7 @@ class Monitor:
         self._history_path = Path(state_dir) / "monitor-events.sqlite3" if state_dir is not None else None
         self._history_detail = None
         self._events = self._load_history()
+        self._baselines = self._load_baselines()
         sources = [("tcp-listeners", _LISTENERS)]
         if self._system == "Darwin":
             sources.append(("macos-launch", _LAUNCH_ITEMS))
@@ -359,6 +379,39 @@ class Monitor:
             started = time.monotonic()
             self._poll(stopping)
             stopping.wait(max(self.interval / 4, self.interval - (time.monotonic() - started)))
+
+    def _load_baselines(self) -> dict[str, set[str]]:
+        result = {"listener": set(), "launch_item": set()}
+        if self._history_path is None:
+            return result
+        try:
+            if not self._history_path.exists():
+                return result
+            with closing(sqlite3.connect(self._history_path, timeout=1)) as database:
+                database.execute(_BASELINE_SCHEMA)
+                for kind, item in database.execute("SELECT kind, item FROM baselines LIMIT ?", (_MAX_BASELINE_ITEMS,)):
+                    if kind in result and isinstance(item, str):
+                        result[kind].add(item)
+        except (OSError, sqlite3.Error, ValueError):
+            pass
+        return result
+
+    def _save_baselines(self, additions: list[tuple[str, str, str]]) -> None:
+        if self._history_path is None or not additions:
+            return
+        path = self._history_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))
+            with closing(sqlite3.connect(path, timeout=1)) as database, database:
+                database.execute(_BASELINE_SCHEMA)
+                database.executemany(
+                    "INSERT INTO baselines (kind, item, first_seen, last_seen) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(kind, item) DO UPDATE SET last_seen = excluded.last_seen",
+                    [(kind, item, at, at) for kind, item, at in additions[:_MAX_BASELINE_ITEMS]],
+                )
+        except (OSError, sqlite3.Error, ValueError):
+            pass
 
     def _load_history(self):
         if self._history_path is None:
@@ -440,14 +493,55 @@ class Monitor:
             gap = (now - self._last_sample).total_seconds() if self._last_sample else 0
             lookback = int(min(3700, max(60, self.interval + 10, gap + 10)))
             listeners, launch_items, events, coverage = self._capture(lookback)
+            baseline_updates: list[tuple[str, str, str]] = []
             with self._guard:
                 if stopping is not None and stopping.is_set():
                     return
                 at = _utc(now)
                 if self._listeners is not None and listeners is not None:
                     events.extend(_listener_changes(at, self._listeners, listeners))
+                if listeners is not None:
+                    known_listeners = self._baselines["listener"]
+                    had_baseline = bool(known_listeners)
+                    current_keys = {f"{addr}:{port}" for addr, port in listeners}
+                    novel = sorted(current_keys - known_listeners)
+                    if had_baseline and novel:
+                        for endpoint in novel[:16]:
+                            events.append(_event(
+                                at,
+                                "high",
+                                "Novel non-loopback TCP listener (baseline drift)",
+                                f"Endpoint {endpoint} was not present in this host's persistent listener baseline.",
+                                _LISTENERS,
+                                identity=f"baseline-listener/{endpoint}",
+                            ))
+                    for endpoint in novel:
+                        if len(known_listeners) < _MAX_BASELINE_ITEMS:
+                            known_listeners.add(endpoint)
+                            baseline_updates.append(("listener", endpoint, at))
+
                 if self._launch_items is not None and launch_items is not None:
                     events.extend(_launch_changes(at, self._launch_items, launch_items))
+                if launch_items is not None:
+                    known_launch = self._baselines["launch_item"]
+                    had_launch_baseline = bool(known_launch)
+                    current_launch = {f"{label}/{name}" for label, name in launch_items}
+                    novel_launch = sorted(current_launch - known_launch)
+                    if had_launch_baseline and novel_launch:
+                        for item_key in novel_launch[:16]:
+                            events.append(_event(
+                                at,
+                                "high",
+                                "Novel launch item (baseline drift)",
+                                f"Launch item {item_key} was not present in this host's persistent persistence baseline.",
+                                _LAUNCH_ITEMS,
+                                identity=f"baseline-launch/{item_key}",
+                            ))
+                    for item_key in novel_launch:
+                        if len(known_launch) < _MAX_BASELINE_ITEMS:
+                            known_launch.add(item_key)
+                            baseline_updates.append(("launch_item", item_key, at))
+
                 self._listeners = listeners
                 self._launch_items = launch_items
                 self._coverage = coverage
@@ -460,6 +554,8 @@ class Monitor:
                     self._events = sorted(self._events + new_events, key=lambda event: (event["at"], event["id"]),
                                           reverse=True)[:_HISTORY_SIZE]
                 unsaved = self._events if self._history_detail else new_events
+            if baseline_updates:
+                self._save_baselines(baseline_updates)
             if unsaved:
                 self._save_history(unsaved)
 

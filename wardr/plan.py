@@ -84,6 +84,8 @@ def _alert_task(item):
         item.get("validation") or "Review the source records and document whether the activity was expected.",
     )
     task["event_ids"] = item.get("event_ids", [])
+    if item.get("mitigation_id"):
+        task["mitigation_id"] = item["mitigation_id"]
     return task
 
 
@@ -113,6 +115,20 @@ def build_plan(host, scan, exposure, hunting, software):
     if software is not None:
         tasks.extend(_advisory_task(item) for item in software["findings"])
     if non_loopback:
+        from .surface import audit_exposure
+        surface_audit = audit_exposure(exposure, probe_local_tls=False)
+        for svc in surface_audit["risky_services"]:
+            priority = "urgent" if svc["severity"] == "critical" else SEVERITY_PRIORITY.get(svc["severity"], "high")
+            tasks.append(_task(
+                f"surface/{svc['id']}", "Attack surface", priority,
+                f"{svc['service']} is bound to {svc['address']}:{svc['port']} ({svc['scope']}). "
+                "Unrestricted network exposure of administrative, database, or local AI services creates severe risk.",
+                f"Restrict exposed {svc['service']} (:{svc['port']})",
+                [f"{svc['protocol'].upper()} {svc['address']}:{svc['port']} · scope: {svc['scope']}"
+                 + (f" · owner: {svc['process']}" if svc.get("process") else "")],
+                [svc["remediation"]],
+                "Rebind the service to 127.0.0.1 or enforce firewall/TLS policy, then refresh local exposure.",
+            ))
         examples = [_endpoint(row) for row in non_loopback[:8]]
         if len(non_loopback) > 8:
             examples.append(f"{len(non_loopback) - 8} more in the local exposure inventory.")
