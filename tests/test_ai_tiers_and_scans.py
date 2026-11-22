@@ -185,7 +185,10 @@ class ScanDepthProfileTests(unittest.TestCase):
                 "scanned_at": "2026-11-22T10:00:00+00:00",
                 "checks": [failing],
             }
-            with patch("wardr.state.checks.apply_fix", return_value={"ok": True, "message": "Hardened to 0700.", "check": fixed}):
+            with (
+                patch("wardr.state.remediation.apply_fix", return_value={"ok": True, "message": "Hardened to 0700.", "check": fixed}),
+                patch("wardr.state.checks.apply_fix", return_value={"ok": True, "message": "Hardened to 0700.", "check": fixed}),
+            ):
                 state._fix_running = True
                 state._fix_batch = {
                     "id": 1,

@@ -252,13 +252,22 @@ def launch_port():
         return probe.getsockname()[1]
 
 
+def exchange_launch_token(port, token):
+    """Exchange a single-use v0.4.0+ launch nonce for a session token, or keep legacy tokens as-is."""
+    code, payload = request(port, token, "/api/auth/exchange", {"nonce": token})
+    if code == 200 and isinstance(payload, dict) and isinstance(payload.get("token"), str) and payload["token"]:
+        return payload["token"]
+    return token
+
+
 def launch_link(log, count, process):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         matches = LAUNCH.findall(log.read_text(encoding="utf-8", errors="replace"))
         if len(matches) >= count:
             port, token = matches[count - 1]
-            return int(port), token
+            port_num = int(port)
+            return port_num, exchange_launch_token(port_num, token)
         if (count == 1 or os.name != "nt") and process.poll() is not None:
             raise RuntimeError(f"Dashboard exited with code {process.returncode} before launch {count}")
         time.sleep(0.1)

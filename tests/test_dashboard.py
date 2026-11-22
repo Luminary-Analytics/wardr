@@ -72,9 +72,13 @@ class DashboardAccessTests(unittest.TestCase):
         )
 
     def test_scan_report_and_verified_fix(self):
-        with patch("wardr.state.checks.scan", return_value={**SCAN, "host": self.state.host["name"]}):
+        with (
+            patch("wardr.state.checks.scan", return_value={**SCAN, "host": self.state.host["name"]}),
+            patch("wardr.state.exposure.collect_exposure", return_value={"listeners": [], "coverage": []}),
+            patch("wardr.state.fim.check_integrity", return_value={"status": "pass", "tracked_count": 0, "changes": []}),
+        ):
             self.assertEqual(self.request("POST", "/api/scan", auth=True, origin=self.server.url, body={})[0], 202)
-            deadline = time.monotonic() + 3
+            deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
                 _, status = self.request("GET", "/api/status", auth=True)
                 if json.loads(status)["scan"]["state"] == "complete":
