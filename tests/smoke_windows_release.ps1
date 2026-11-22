@@ -120,8 +120,21 @@ function Assert-WardrDashboard {
         }
 
         $origin = 'http://127.0.0.1:' + $launchUrl.Groups[1].Value
-        $headers = @{ 'X-Wardr-Token' = $launchUrl.Groups[2].Value; Origin = $origin }
+        $rawToken = $launchUrl.Groups[2].Value
         $request = @{ NoProxy = $true; MaximumRedirection = 0; TimeoutSec = 30 }
+        $sessionToken = $rawToken
+        try {
+            $exchange = Invoke-RestMethod @request -Uri "$origin/api/auth/exchange" -Method Post `
+                -Headers @{ Origin = $origin } -ContentType 'application/json' `
+                -Body (ConvertTo-Json @{ nonce = $rawToken } -Compress)
+            if ($exchange -and $exchange.token) {
+                $sessionToken = [string]$exchange.token
+            }
+        }
+        catch {
+            $sessionToken = $rawToken
+        }
+        $headers = @{ 'X-Wardr-Token' = $sessionToken; Origin = $origin }
         $dashboardPage = Invoke-WebRequest @request -Uri "$origin/"
         if ($dashboardPage.StatusCode -ne 200 -or $dashboardPage.Content -notmatch 'id="updates-button"') {
             throw 'The installed dashboard did not expose the Updates control.'
