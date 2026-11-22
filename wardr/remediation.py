@@ -541,12 +541,18 @@ def undo_fix(rollback_id: str, state_dir: Path) -> dict:
     if record.get("restored_at") is not None:
         return {"ok": False, "message": "This remediation was already rolled back."}
 
+    check_id = record.get("check_id")
+    spec = _SSH_SPECS.get(check_id) or _CREDENTIAL_SPECS.get(check_id)
+    if spec is None:
+        return {"ok": False, "message": "Wardr refused rollback because the recorded check ID is not allowlisted."}
     targets = record.get("targets", [])
     restored = 0
     try:
         for item in targets:
             rel_dir = item["dir"]
-            old_mode = int(item["old_mode"]) & 0o7777
+            if rel_dir != spec["dir"]:
+                raise PermissionError("Recorded rollback directory does not match allowlisted spec")
+            old_mode = int(item["old_mode"]) & 0o0777
             expected_dev, expected_ino = int(item["dev"]), int(item["ino"])
             if item["kind"] == "dir":
                 with _open_owned_dir(rel_dir) as (fd, info):
@@ -556,6 +562,8 @@ def undo_fix(rollback_id: str, state_dir: Path) -> dict:
                     restored += 1
             elif item["kind"] == "file":
                 name = item["name"]
+                if not isinstance(name, str) or name not in spec["files"] or "/" in name or name in (".", ".."):
+                    raise PermissionError("Recorded rollback filename is not allowlisted")
                 with _open_owned_dir(rel_dir) as (dir_fd, _):
                     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
                     try:

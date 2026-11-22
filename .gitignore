@@ -6,3 +6,5 @@ __pycache__/
 build/
 dist/
 site-dist/
+.env
+deploy/threat-network/secrets/

@@ -25,13 +25,28 @@ _IO_TIMEOUT = 10
 
 _REDACT_PATTERNS = (
     ("secret", re.compile(r"-----BEGIN [A-Z0-9 ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]+PRIVATE KEY-----")),
-    ("secret", re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{16,}=*\b", re.I)),
+    ("secret", re.compile(r"\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}\b", re.I)),
+    ("secret", re.compile(r"://[^/\s:@]+:[^/\s@]+@")),
     ("secret", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
-    ("secret", re.compile(r"\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{20,}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9A-Za-z-]{15,}|hf_[A-Za-z0-9]{20,})\b")),
+    ("secret", re.compile(
+        r"\b(?:"
+        r"sk-(?:proj-|ant-|or-v1-)?[A-Za-z0-9_-]{20,}|"
+        r"gsk_[A-Za-z0-9]{20,}|"
+        r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|"
+        r"github_pat_[A-Za-z0-9_]{20,}|"
+        r"glpat-[A-Za-z0-9_-]{16,}|"
+        r"npm_[A-Za-z0-9]{20,}|"
+        r"pypi-[A-Za-z0-9_-]{20,}|"
+        r"AIza[0-9A-Za-z_-]{20,}|"
+        r"(?:AKIA|ASIA)[0-9A-Z]{16}|"
+        r"xox[baprs]-[0-9A-Za-z-]{15,}|"
+        r"hf_[A-Za-z0-9]{20,}"
+        r")\b"
+    )),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
-    ("home_path", re.compile(r"(?:/Users/[^/\s\"']+|/home/[^/\s\"']+|[A-Za-z]:\\Users\\[^\\\s\"']+)")),
+    ("home_path", re.compile(r"(?:/Users/[^/\s\"']+|/home/[^/\s\"']+|/root(?=/|\b)|[A-Za-z]:[\\/]Users[\\/][^\\/\s\"']+)", re.I)),
     ("ipv4", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
-    ("ipv6", re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}\b")),
+    ("ipv6", re.compile(r"(?<![0-9a-fA-F:])(?:(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{0,4}|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}|::1)(?![0-9a-fA-F:])")),
 )
 _REPLACEMENTS = {
     "secret": "<REDACTED_SECRET>",

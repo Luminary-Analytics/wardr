@@ -1,0 +1,49 @@
+services:
+  wardr-threat-network:
+    build:
+      context: ../..
+      dockerfile: deploy/threat-network/Dockerfile
+    container_name: wardr-threat-network
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    environment:
+      # Generate with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+      WARDR_ADMIN_TOKEN: "${WARDR_ADMIN_TOKEN:?Set WARDR_ADMIN_TOKEN in .env}"
+    volumes:
+      - wardr-data:/data
+      # Optional: mount your Ed25519 signing private key read-only to enable POST /v1/feeds/publish
+      # - ./secrets/feed-ed25519.pem:/run/secrets/feed-ed25519.pem:ro
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: wardr-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      wardr-threat-network:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  wardr-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    driver: bridge

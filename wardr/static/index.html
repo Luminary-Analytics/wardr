@@ -24,6 +24,13 @@
         <a href="#events" data-nav="events"><span class="icon icon-pulse" aria-hidden="true"></span>Events</a>
         <a href="#reports" data-nav="reports"><span class="icon icon-file" aria-hidden="true"></span>Reports</a>
       </nav>
+      <div class="sidebar-guard" id="sidebar-guard" data-active="false">
+        <span class="mini-radar" aria-hidden="true"></span>
+        <div>
+          <p class="sidebar-guard-title" id="sidebar-guard-title">Connecting…</p>
+          <p class="sidebar-guard-sub" id="sidebar-guard-sub">Real-time radar</p>
+        </div>
+      </div>
       <div class="device">
         <span class="device-icon icon icon-device" aria-hidden="true"></span>
         <div>
@@ -31,104 +38,397 @@
           <p class="device-os" id="device-os">Connecting…</p>
         </div>
       </div>
+      <button type="button" class="sidebar-account" id="sidebar-account-btn" aria-haspopup="dialog" disabled>
+        <span class="account-avatar" id="sidebar-account-avatar" aria-hidden="true">?</span>
+        <span class="sidebar-account-text">
+          <span class="sidebar-account-name" id="sidebar-account-name">Sign in</span>
+          <span class="sidebar-account-email" id="sidebar-account-email">Account &amp; privacy</span>
+        </span>
+        <span class="sidebar-account-caret" aria-hidden="true">⋯</span>
+      </button>
     </aside>
     <main id="main" class="main" tabindex="-1">
       <div class="shell">
         <header class="topline">
-          <div class="scope"><span class="icon icon-device" aria-hidden="true"></span><span id="workspace-mode">Local workspace</span></div>
+          <div class="topline-left">
+            <div class="scope"><span class="icon icon-device" aria-hidden="true"></span><span id="workspace-mode">Local workspace</span></div>
+            <div class="live-pill" id="live-radar-pill" data-active="false" data-scanning="false">
+              <span class="live-pulse" aria-hidden="true"></span>
+              <span id="live-radar-label">Starting continuous scan…</span>
+            </div>
+          </div>
           <div class="topline-actions">
             <div class="connection" id="connection"><span class="dot"></span><span id="connection-label">Connecting</span></div>
+            <button class="button button-secondary button-small" type="button" id="whats-new-button" aria-haspopup="dialog" disabled>What’s new</button>
             <button class="button button-secondary button-small" type="button" id="updates-button" aria-haspopup="dialog" disabled>Updates</button>
+            <button class="button button-secondary button-small account-chip" type="button" id="account-button" aria-haspopup="dialog" disabled>
+              <span class="account-avatar account-avatar-sm" id="top-account-avatar" aria-hidden="true">?</span>
+              <span id="account-button-label">Sign in</span>
+              <span class="account-caret" aria-hidden="true">▾</span>
+            </button>
           </div>
         </header>
         <div class="page-header">
           <div>
             <h1 id="page-title">Overview</h1>
-            <p id="page-description">Security checks and activity for this device.</p>
+            <p id="page-description">Real-time protection, active threats, and security checklist for this device.</p>
           </div>
-          <button class="button button-primary" type="button" id="scan-button" disabled><span class="icon icon-scan" aria-hidden="true"></span><span id="scan-label">Run scan</span></button>
+          <div class="header-actions" id="header-actions" hidden>
+            <button class="button button-primary" type="button" id="scan-button" disabled><span class="icon icon-scan" aria-hidden="true"></span><span id="scan-label">Run scan</span></button>
+          </div>
         </div>
         <div class="notice" id="connection-error" role="status" hidden></div>
         <div class="notice" id="scan-notice" role="status" hidden></div>
         <p class="sr-only" id="announcer" aria-live="polite"></p>
+
         <section class="view" id="overview-view" aria-labelledby="page-title">
-          <div class="overview-grid">
-            <article class="posture">
-              <div class="posture-visual" aria-hidden="true"><span class="orbit orbit-outer"></span><span class="orbit orbit-inner"></span><span class="orbit-dot"></span><img src="/static/wardr-mark.png" alt="" id="hero-mark"></div>
-              <div class="posture-body">
-                <p class="posture-label"><span class="dot"></span>Security posture</p>
-                <h2 id="posture-headline">Waiting for results</h2>
-                <p id="posture-description">Complete a device scan to see your risk factors.</p>
-              </div>
-              <ul class="severity-summary" aria-label="Open findings by severity">
-                <li class="risk-critical"><span><i aria-hidden="true"></i>Critical</span><strong id="risk-critical">–</strong></li>
-                <li class="risk-high"><span><i aria-hidden="true"></i>High</span><strong id="risk-high">–</strong></li>
-                <li class="risk-medium"><span><i aria-hidden="true"></i>Medium</span><strong id="risk-medium">–</strong></li>
-                <li class="risk-low"><span><i aria-hidden="true"></i>Low</span><strong id="risk-low">–</strong></li>
-              </ul>
-            </article>
-            <article class="card review-card">
-              <div class="section-heading">
-                <div>
-                  <h2>Priority checklist</h2>
-                  <p>Address the checks that need attention.</p>
+          <div class="overview-stack">
+            <article class="posture" id="posture-hero" data-rag="pending" data-monitoring="false" data-scanning="false">
+              <div class="posture-content">
+                <div class="rag-strip">
+                  <span class="rag-pill" id="rag-pill">
+                    <span class="rag-lights" aria-hidden="true">
+                      <span class="rag-light rag-light-red"></span>
+                      <span class="rag-light rag-light-amber"></span>
+                      <span class="rag-light rag-light-green"></span>
+                    </span>
+                    <span id="rag-label">Scanning</span>
+                  </span>
+                  <span class="posture-cadence" id="posture-cadence">Initializing continuous radar…</span>
                 </div>
-                <a href="#checklist" class="text-link">View checklist <span aria-hidden="true">↗</span></a>
+                <h2 id="posture-headline">Running initial protection scan</h2>
+                <p class="posture-summary" id="posture-description">Wardr is checking everything it can secure on this device.</p>
+                <div class="coverage-meter">
+                  <div class="coverage-meter-head">
+                    <span id="coverage-meter-label">Securable items protected</span>
+                    <strong id="coverage-meter-value">—</strong>
+                  </div>
+                  <progress id="protection-meter" class="protection-meter" value="0" max="1"></progress>
+                  <p class="coverage-meter-note" id="protection-verdict">Complete a scan to see whether this device is as safe as Wardr can make it.</p>
+                  <p class="coverage-depth-note" id="scan-depth-summary" hidden></p>
+                </div>
+                <div class="posture-actions">
+                  <button class="button hero-cta hero-cta-scan" type="button" id="hero-scan-button" disabled><span class="icon icon-scan" aria-hidden="true"></span><span id="hero-scan-label">Run scan now</span></button>
+                  <button class="button hero-cta hero-cta-report" type="button" data-visual-report="true" id="hero-report-button" disabled><span class="icon icon-file" aria-hidden="true"></span><span id="hero-report-label">Visual report</span></button>
+                </div>
+                <ul class="severity-summary" aria-label="Open findings by severity">
+                  <li class="risk-secured"><span><i aria-hidden="true"></i>Secured</span><strong id="risk-secured">–</strong></li>
+                  <li class="risk-critical"><span><i aria-hidden="true"></i>Critical</span><strong id="risk-critical">–</strong></li>
+                  <li class="risk-high"><span><i aria-hidden="true"></i>High</span><strong id="risk-high">–</strong></li>
+                  <li class="risk-medium"><span><i aria-hidden="true"></i>Medium</span><strong id="risk-medium">–</strong></li>
+                  <li class="risk-low"><span><i aria-hidden="true"></i>Low</span><strong id="risk-low">–</strong></li>
+                </ul>
+              </div>
+              <div class="radar-column">
+                <div class="radar-stage" aria-hidden="true">
+                  <span class="radar-ring radar-ring-1"></span>
+                  <span class="radar-ring radar-ring-2"></span>
+                  <span class="radar-ring radar-ring-3"></span>
+                  <span class="radar-axis radar-axis-h"></span>
+                  <span class="radar-axis radar-axis-v"></span>
+                  <span class="radar-sweep"></span>
+                  <span class="radar-ping"></span>
+                  <span class="radar-blip radar-blip-1"></span>
+                  <span class="radar-blip radar-blip-2"></span>
+                  <span class="radar-blip radar-blip-3"></span>
+                  <div class="radar-shield">
+                    <svg viewBox="0 0 100 112" focusable="false">
+                      <path class="shield-body" d="M50 5 L90 21 V55 C90 80 73 97 50 107 C27 97 10 80 10 55 V21 Z"></path>
+                      <path class="shield-glyph glyph-check" d="M34 53 L45 64 L67 40"></path>
+                      <g class="shield-glyph glyph-alert">
+                        <path d="M50 33 L50 56"></path>
+                        <circle cx="50" cy="69" r="4"></circle>
+                      </g>
+                      <g class="shield-glyph glyph-scan">
+                        <circle cx="36" cy="54" r="4"></circle>
+                        <circle cx="50" cy="54" r="4"></circle>
+                        <circle cx="64" cy="54" r="4"></circle>
+                      </g>
+                    </svg>
+                  </div>
+                </div>
+                <div class="radar-caption">
+                  <span class="dot" aria-hidden="true"></span>
+                  <span id="radar-caption-text">Connecting to continuous scanner…</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="card workflow-stage" id="workflow-stage" data-mode="scan" data-phase="running" aria-live="polite" hidden>
+              <div class="workflow-header">
+                <div class="workflow-title-wrap">
+                  <span class="workflow-spinner" id="workflow-spinner" aria-hidden="true">
+                    <svg viewBox="0 0 36 36" focusable="false">
+                      <circle class="wf-ring-bg" cx="18" cy="18" r="14"></circle>
+                      <circle class="wf-ring-arc" cx="18" cy="18" r="14"></circle>
+                      <path class="wf-shield" d="M18 6 L28 10 V19 C28 25 23.5 29.5 18 32 C12.5 29.5 8 25 8 19 V10 Z"></path>
+                      <path class="wf-check" d="M13 18.5 L16.5 22 L23.5 14.5"></path>
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 id="workflow-title">Scanning your device…</h2>
+                    <p id="workflow-subtitle">Checking security controls and active telemetry.</p>
+                  </div>
+                </div>
+                <div class="workflow-header-right">
+                  <strong class="workflow-pct" id="workflow-pct">0%</strong>
+                  <button type="button" class="button button-secondary button-small" id="workflow-dismiss" hidden>Dismiss</button>
+                </div>
+              </div>
+              <progress class="workflow-progress" id="workflow-progress" value="0" max="100"></progress>
+              <ul class="workflow-steps" id="workflow-steps"></ul>
+              <div class="workflow-actions-panel" id="workflow-actions-panel" hidden>
+                <div class="workflow-actions-head">
+                  <div>
+                    <h3 id="workflow-actions-title">Recommended actions from this scan</h3>
+                    <p id="workflow-actions-note">Fix automatic issues with one click (rollback snapshots saved automatically).</p>
+                  </div>
+                  <button type="button" class="button button-protect" id="workflow-fix-all" hidden>
+                    <span class="icon icon-defend" aria-hidden="true"></span>
+                    <span id="workflow-fix-all-label">Fix &amp; Protect</span>
+                  </button>
+                </div>
+                <ul class="workflow-todo-list" id="workflow-todo-list"></ul>
+              </div>
+            </article>
+
+            <article class="card threat-panel" id="threat-panel" data-threat-state="clear" aria-live="polite">
+              <div class="threat-header">
+                <div class="threat-title-row">
+                  <span class="threat-emblem" id="threat-emblem" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path class="emblem-check" d="M5 13 L10 18 L19 7"></path>
+                      <g class="emblem-alert">
+                        <path d="M12 6 L12 13"></path>
+                        <circle cx="12" cy="17" r="1.4"></circle>
+                      </g>
+                    </svg>
+                  </span>
+                  <div>
+                    <h2 id="threat-headline">Checking for active threats…</h2>
+                    <p id="threat-subtitle">Continuous radar monitors local telemetry and threat-hunting rules.</p>
+                  </div>
+                </div>
+                <div class="threat-header-actions">
+                  <span class="threat-pill" id="threat-pill">Monitoring</span>
+                  <a href="#events" class="text-link">Live activity <span aria-hidden="true">↗</span></a>
+                </div>
+              </div>
+              <div id="threat-list" class="threat-list" hidden></div>
+            </article>
+
+            <article class="card checklist-overview-card">
+              <div class="section-heading checklist-heading">
+                <div>
+                  <h2>Protection checklist</h2>
+                  <p id="overview-checklist-subtitle">Visual status of everything Wardr can secure on this device.</p>
+                </div>
+                <div class="filter-pills" role="group" aria-label="Filter checklist">
+                  <button type="button" class="filter-pill" data-overview-filter="all" aria-pressed="true">All <span id="pill-count-all">0</span></button>
+                  <button type="button" class="filter-pill" data-overview-filter="attention" aria-pressed="false">Needs action <span id="pill-count-attention">0</span></button>
+                  <button type="button" class="filter-pill" data-overview-filter="secured" aria-pressed="false">Secured <span id="pill-count-secured">0</span></button>
+                  <button type="button" class="filter-pill" data-overview-filter="unknown" aria-pressed="false">Unverified <span id="pill-count-unknown">0</span></button>
+                </div>
               </div>
               <div id="priority-list" class="check-list"><p class="empty">Scan results will appear here.</p></div>
+              <div class="card-bottom checklist-footer">
+                <div class="checklist-footer-left">
+                  <span id="overview-fixable-note" class="muted-note"></span>
+                  <button type="button" class="button button-protect button-small" id="checklist-fix-all" hidden>
+                    <span class="icon icon-defend" aria-hidden="true"></span>
+                    <span id="checklist-fix-all-label">Fix &amp; Protect</span>
+                  </button>
+                </div>
+                <a href="#checklist" class="text-link">Open full checklist <span aria-hidden="true">↗</span></a>
+              </div>
             </article>
-            <article class="card monitor-card">
-              <div class="card-icon"><span class="icon icon-pulse" aria-hidden="true"></span></div>
-              <h2>Event monitoring</h2>
-              <div class="monitor-status" id="monitor-status"><span class="dot" aria-hidden="true"></span><span id="monitor-label">Waiting for status</span></div>
-              <p id="monitor-detail">Tracks changes to supported settings and services on this device.</p>
-              <p id="monitor-coverage" class="monitor-coverage" hidden></p>
-              <div class="card-bottom"><a href="#events" class="text-link">View events <span aria-hidden="true">↗</span></a></div>
+
+            <article class="card tiers-card" id="tiers-card">
+              <div class="section-heading tiers-heading">
+                <div>
+                  <h2>Active protection tiers</h2>
+                  <p id="tiers-subtitle">Combine always-on local radar with free cloud AI offload or fully offline local models.</p>
+                </div>
+                <div class="tiers-actions">
+                  <button type="button" class="button button-secondary button-small" id="ai-triage-button" disabled>Run AI triage</button>
+                  <button type="button" class="button button-primary button-small" id="ai-config-button" disabled>Configure AI tiers</button>
+                </div>
+              </div>
+              <div class="tiers-grid">
+                <div class="tier-box" id="tier-box-radar" data-active="true" data-ready="true">
+                  <div class="tier-box-head">
+                    <span class="tier-tag">Tier 1</span>
+                    <span class="tier-state" id="tier1-state">Always active</span>
+                  </div>
+                  <h3>Always-On Local Radar</h3>
+                  <p class="tier-desc">Deterministic background sweep for ports, launch items, file integrity, and OS settings.</p>
+                  <p class="tier-meta" id="tier1-meta">Minimal load · &lt;30 MB RAM · 0% GPU</p>
+                </div>
+                <div class="tier-box" id="tier-box-cloud" data-active="false" data-ready="false">
+                  <div class="tier-box-head">
+                    <span class="tier-tag">Tier 2</span>
+                    <span class="tier-state" id="tier2-state">Not configured</span>
+                  </div>
+                  <h3>Free Cloud AI Offload</h3>
+                  <p class="tier-desc">Offloads AI threat analysis to a free open-source cloud API — strictly redacted locally before sending.</p>
+                  <p class="tier-meta" id="tier2-meta">Zero local CPU/RAM load</p>
+                </div>
+                <div class="tier-box" id="tier-box-local" data-active="false" data-ready="false">
+                  <div class="tier-box-head">
+                    <span class="tier-tag">Tier 3</span>
+                    <span class="tier-state" id="tier3-state">Checking Ollama…</span>
+                  </div>
+                  <h3>Heavy Local AI</h3>
+                  <p class="tier-desc">100% offline cybersecurity models on your hardware (Cisco Foundation-Sec-8B, Qwen3 4B, or Inkling 2 Mini).</p>
+                  <p class="tier-meta" id="tier3-meta">Private offline inference</p>
+                </div>
+              </div>
+              <p class="notice" id="ai-triage-error" data-tone="error" role="status" hidden></p>
+              <div class="ai-triage-box" id="ai-triage-box" hidden>
+                <div class="ai-triage-head">
+                  <strong id="ai-triage-title">AI Protection Analysis</strong>
+                  <span class="status-label" id="ai-triage-badge" data-tone="pass"></span>
+                </div>
+                <p id="ai-triage-summary"></p>
+                <p class="ai-triage-verdict" id="ai-triage-verdict"></p>
+                <ul class="ai-triage-actions" id="ai-triage-actions"></ul>
+                <p class="ai-triage-meta" id="ai-triage-meta"></p>
+              </div>
             </article>
-            <article class="card intel-card">
-              <div class="card-icon"><span class="icon icon-intel" aria-hidden="true"></span></div>
-              <h2>Advisory catalog</h2>
-              <p>CISA’s list of vulnerabilities with evidence of active exploitation.</p>
-              <div class="intel-state" id="intel-state">Waiting for status</div>
-              <p class="intel-version" id="intel-version" hidden></p>
-              <details class="intel-advisories" id="intel-advisories" hidden>
-                <summary>Recent advisories</summary>
-                <p id="intel-scope"></p>
-                <ul id="intel-list"></ul>
-                <a class="text-link" id="intel-source" target="_blank" rel="noopener noreferrer" hidden>Open CISA catalog <span aria-hidden="true">↗</span></a>
-              </details>
-              <div class="card-bottom"><button class="button button-secondary button-small" type="button" id="intel-button" disabled>Refresh catalog</button></div>
-            </article>
+
+            <div class="overview-lower">
+              <article class="card monitor-card">
+                <div class="card-head-inline">
+                  <div class="card-icon"><span class="icon icon-pulse" aria-hidden="true"></span></div>
+                  <div>
+                    <h2>Continuous protection</h2>
+                    <div class="monitor-status" id="monitor-status"><span class="dot" aria-hidden="true"></span><span id="monitor-label">Waiting for status</span></div>
+                  </div>
+                </div>
+                <p id="monitor-detail">Constantly scans local listeners, persistence items, and OS security logs.</p>
+                <p id="monitor-coverage" class="monitor-coverage" hidden></p>
+                <ul id="monitor-sensors" class="sensor-list" hidden></ul>
+                <div class="card-bottom"><a href="#events" class="text-link">View live events <span aria-hidden="true">↗</span></a></div>
+              </article>
+
+              <article class="card intel-card">
+                <div class="card-head-inline">
+                  <div class="card-icon"><span class="icon icon-intel" aria-hidden="true"></span></div>
+                  <div>
+                    <h2>Threat intelligence</h2>
+                    <div class="intel-state" id="intel-state">Waiting for status</div>
+                  </div>
+                </div>
+                <p>CISA’s catalog of vulnerabilities with evidence of active exploitation.</p>
+                <p class="intel-version" id="intel-version" hidden></p>
+                <details class="intel-advisories" id="intel-advisories" hidden>
+                  <summary>Recent advisories</summary>
+                  <p id="intel-scope"></p>
+                  <ul id="intel-list"></ul>
+                  <a class="text-link" id="intel-source" target="_blank" rel="noopener noreferrer" hidden>Open CISA catalog <span aria-hidden="true">↗</span></a>
+                </details>
+                <div class="card-bottom"><button class="button button-secondary button-small" type="button" id="intel-button" disabled>Refresh catalog</button></div>
+              </article>
+            </div>
           </div>
         </section>
+
         <section class="view" id="checklist-view" aria-labelledby="page-title" hidden>
           <div class="card checklist-card">
             <div class="section-heading">
               <div>
-                <h2>Device checks</h2>
+                <h2>Device security checklist</h2>
                 <p id="checklist-subtitle">Scan results will appear here.</p>
               </div>
               <div class="field">
                 <label for="check-filter">Show</label>
                 <select id="check-filter">
-                  <option value="attention">Needs attention</option>
-                  <option value="unknown">Unable to verify</option>
                   <option value="all">All results</option>
+                  <option value="attention">Needs attention</option>
+                  <option value="secured">Secured</option>
+                  <option value="unknown">Unable to verify</option>
                 </select>
               </div>
             </div>
             <div id="full-checklist" class="check-list"><p class="empty">Run a scan to review this device.</p></div>
           </div>
         </section>
+
         <section class="view" id="defense-view" aria-labelledby="page-title" hidden>
-          <div class="defense-tabs" role="tablist" aria-label="Defense tools">
-            <button type="button" role="tab" id="defense-tab-plan" data-defense-tab="plan" aria-controls="defense-plan" aria-selected="true">Plan</button>
-            <button type="button" role="tab" id="defense-tab-exposure" data-defense-tab="exposure" aria-controls="defense-exposure" aria-selected="false" tabindex="-1">Exposure</button>
-            <button type="button" role="tab" id="defense-tab-hunting" data-defense-tab="hunting" aria-controls="defense-hunting" aria-selected="false" tabindex="-1">Hunting</button>
-            <button type="button" role="tab" id="defense-tab-software" data-defense-tab="software" aria-controls="defense-software" aria-selected="false" tabindex="-1">Software</button>
+          <div class="defense-topbar">
+            <div class="defense-tabs" role="tablist" aria-label="Defense tools">
+              <button type="button" role="tab" id="defense-tab-matrix" data-defense-tab="matrix" aria-controls="defense-matrix" aria-selected="true">What We Defend</button>
+              <button type="button" role="tab" id="defense-tab-pentest" data-defense-tab="pentest" aria-controls="defense-pentest" aria-selected="false" tabindex="-1">Pen-Test Lab</button>
+              <button type="button" role="tab" id="defense-tab-plan" data-defense-tab="plan" aria-controls="defense-plan" aria-selected="false" tabindex="-1">Plan</button>
+              <button type="button" role="tab" id="defense-tab-exposure" data-defense-tab="exposure" aria-controls="defense-exposure" aria-selected="false" tabindex="-1">Exposure</button>
+              <button type="button" role="tab" id="defense-tab-hunting" data-defense-tab="hunting" aria-controls="defense-hunting" aria-selected="false" tabindex="-1">Hunting</button>
+              <button type="button" role="tab" id="defense-tab-software" data-defense-tab="software" aria-controls="defense-software" aria-selected="false" tabindex="-1">Software</button>
+            </div>
+            <div class="defense-topbar-right">
+              <div class="audience-toggle" role="group" aria-label="Explanation detail level">
+                <button type="button" class="audience-pill" data-audience="plain" aria-pressed="true">Everyday view</button>
+                <button type="button" class="audience-pill" data-audience="technical" aria-pressed="false">Technical view</button>
+              </div>
+              <button type="button" class="button button-primary button-small" id="run-pentest-top" disabled>Run Self-Pen-Test</button>
+            </div>
           </div>
           <p class="notice" id="defense-notice" role="status" hidden></p>
-          <div class="card" id="defense-plan" role="tabpanel" aria-labelledby="defense-tab-plan" tabindex="0">
+
+          <div class="card" id="defense-matrix" role="tabpanel" aria-labelledby="defense-tab-matrix" tabindex="0">
+            <div class="section-heading defense-heading">
+              <div>
+                <h2>What Wardr protects you against</h2>
+                <p id="matrix-subtitle">Live threat-by-threat breakdown of real-world attacks and how Wardr defends this device.</p>
+              </div>
+              <div class="matrix-summary-pills" id="matrix-summary-pills"></div>
+            </div>
+            <div class="matrix-grid" id="matrix-grid">
+              <p class="empty">Loading live defense coverage…</p>
+            </div>
+          </div>
+
+          <div class="card" id="defense-pentest" role="tabpanel" aria-labelledby="defense-tab-pentest" tabindex="0" hidden>
+            <div class="pentest-hero" id="pentest-hero" data-verdict="idle">
+              <div class="pentest-hero-main">
+                <div class="pentest-safety-pill">100% Local · Non-Destructive · Zero External Hosts</div>
+                <h2 id="pentest-verdict-title">Authorized Local Attack Simulator</h2>
+                <p id="pentest-verdict-summary">Safely probes your own device across 6 real attacker techniques (Wi-Fi port exposure, infostealer secret harvest, startup backdoors, PATH hijacks, firewall boundaries, and a live tamper canary) to prove your defenses hold.</p>
+                <div class="pentest-hero-actions">
+                  <button type="button" class="button button-protect-glow" id="pentest-lab-fix-all" hidden>
+                    <span class="icon icon-defend" aria-hidden="true"></span>
+                    <span id="pentest-lab-fix-all-label">Fix &amp; Harden All</span>
+                  </button>
+                  <button type="button" class="button button-primary" id="run-pentest-full" disabled>Run Full Self-Pen-Test (6 Probes)</button>
+                  <span class="pentest-ran-at" id="pentest-ran-at">Not run yet on this session</span>
+                </div>
+              </div>
+              <div class="pentest-score-box">
+                <span class="pentest-score-label">Resilience Score</span>
+                <strong class="pentest-score-val" id="pentest-score-val">—</strong>
+                <span class="pentest-score-sub" id="pentest-score-sub">Run to prove defenses</span>
+              </div>
+            </div>
+
+            <div class="pentest-section" id="attack-paths-section" hidden>
+              <div class="pentest-section-head">
+                <h3>Simulated Attack Paths (Kill-Chain Analysis)</h3>
+                <p>Shows how real attackers chain steps together — and exactly where Wardr breaks the chain.</p>
+              </div>
+              <div class="attack-path-grid" id="attack-path-grid"></div>
+            </div>
+
+            <div class="pentest-section">
+              <div class="pentest-section-head">
+                <h3>Attack Simulation Probes</h3>
+                <p id="pentest-probes-note">Switch between Everyday view and Technical view above to inspect plain-English impact or MITRE ATT&amp;CK probes.</p>
+              </div>
+              <div class="check-list" id="pentest-list">
+                <p class="empty">Click “Run Full Self-Pen-Test” to safely test all 6 attack vectors against this device.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" id="defense-plan" role="tabpanel" aria-labelledby="defense-tab-plan" tabindex="0" hidden>
             <div class="section-heading defense-heading">
               <div><h2>Remediation plan</h2><p>Prioritized actions with the evidence and a way to verify each change.</p></div>
               <div class="defense-actions">
@@ -177,6 +477,24 @@
             <div id="hunting-list" class="check-list"></div>
           </div>
           <div class="card" id="defense-software" role="tabpanel" aria-labelledby="defense-tab-software" tabindex="0" hidden>
+            <div class="supply-chain-box">
+              <div class="section-heading defense-heading">
+                <div>
+                  <h2>Compromised packages &amp; exploit scanner</h2>
+                  <p>Scans local repos, lockfiles, global npm modules &amp; runtimes for compromised npm packages, malicious <code>postinstall</code> hooks, React2Shell (CVE-2025-55182), PHP2Shell (CVE-2024-4577), Next.js middleware bypass, Log4Shell &amp; Polyfill.io.</p>
+                </div>
+                <button type="button" id="supply-chain-scan-btn" class="button button-primary button-small" disabled>Scan Local Repos &amp; Packages</button>
+              </div>
+              <div class="supply-chain-controls">
+                <input type="text" id="supply-chain-path" class="sc-path-input" maxlength="400" placeholder="Optional folder path (leave blank to auto-scan ~/Repos, ~/Projects, ~/Code, global npm &amp; PHP)">
+              </div>
+              <p class="defense-caption" id="supply-chain-status">Click “Scan Local Repos &amp; Packages” to inspect local projects and runtimes.</p>
+              <div id="supply-chain-counts" class="defense-metrics" hidden></div>
+              <div id="supply-chain-list" class="check-list"></div>
+            </div>
+
+            <hr class="defense-divider">
+
             <div class="section-heading defense-heading">
               <div><h2>Software advisory matching</h2><p>Auto-discover installed packages or compare a CycloneDX inventory with OSV advisories.</p></div>
               <button type="button" id="software-auto-scan" class="button button-secondary button-small" disabled>Auto-scan installed software</button>
@@ -194,6 +512,7 @@
             <button type="button" class="button button-secondary button-small defense-more" id="software-more" hidden>Show more</button>
           </div>
         </section>
+
         <section class="view" id="events-view" aria-labelledby="page-title" hidden>
           <div class="card events-card">
             <div class="section-heading">
@@ -211,36 +530,365 @@
             <div id="event-list" class="event-list"><p class="empty">Events will appear here when Wardr detects a change.</p></div>
           </div>
         </section>
+
         <section class="view" id="reports-view" aria-labelledby="page-title" hidden>
           <div class="card reports-card">
             <div class="section-heading">
               <div>
-                <h2>Security assessment</h2>
-                <p id="report-detail">Reports describe the latest scan, its findings, and suggested next steps.</p>
+                <h2>Visual security report</h2>
+                <p id="report-detail">Reports show your Red / Amber / Green protection rating, active threats, and visual security checklist.</p>
+              </div>
+            </div>
+            <div class="report-rag-preview" id="report-rag-preview" data-rag="pending">
+              <div class="report-rag-shield" aria-hidden="true">
+                <svg viewBox="0 0 100 112" focusable="false">
+                  <path class="shield-body" d="M50 5 L90 21 V55 C90 80 73 97 50 107 C27 97 10 80 10 55 V21 Z"></path>
+                  <path class="shield-glyph glyph-check" d="M34 53 L45 64 L67 40"></path>
+                  <g class="shield-glyph glyph-alert">
+                    <path d="M50 33 L50 56"></path>
+                    <circle cx="50" cy="69" r="4"></circle>
+                  </g>
+                  <g class="shield-glyph glyph-scan">
+                    <circle cx="36" cy="54" r="4"></circle>
+                    <circle cx="50" cy="54" r="4"></circle>
+                    <circle cx="64" cy="54" r="4"></circle>
+                  </g>
+                </svg>
+              </div>
+              <div class="report-rag-body">
+                <span class="rag-pill rag-pill-inline">
+                  <span class="rag-lights" aria-hidden="true">
+                    <span class="rag-light rag-light-red"></span>
+                    <span class="rag-light rag-light-amber"></span>
+                    <span class="rag-light rag-light-green"></span>
+                  </span>
+                  <span id="report-rag-label">Pending scan</span>
+                </span>
+                <h3 id="report-rag-headline">Waiting for scan results</h3>
+                <p id="report-rag-summary">Run a scan to generate your Red / Amber / Green security certificate and checklist.</p>
+                <div class="report-rag-stats" id="report-rag-stats"></div>
               </div>
             </div>
             <div class="report-options">
               <div class="report-option">
                 <span class="card-icon icon icon-file" aria-hidden="true"></span>
-                <div><h3>Readable report</h3><p>Review the risk factors and recommended actions. Save a PDF from the browser’s print menu.</p></div>
-                <button type="button" data-report="/report.html" class="button button-secondary" disabled>Open report</button>
+                <div><h3>Visual Red / Amber / Green report</h3><p>Full shield verdict, active threats status, and item-by-item visual checklist in an interactive report modal.</p></div>
+                <button type="button" data-visual-report="true" class="button button-primary" disabled>Open visual report</button>
               </div>
               <div class="report-option">
                 <span class="card-icon icon icon-braces" aria-hidden="true">{ }</span>
-                <div><h3>JSON export</h3><p>Download the assessment data for local analysis or archiving.</p></div>
+                <div><h3>JSON export</h3><p>Download the complete machine-readable assessment, RAG posture, and evidence.</p></div>
                 <button type="button" data-report="/report.json?download=1" class="button button-secondary" disabled>Download JSON</button>
               </div>
             </div>
           </div>
         </section>
+
         <footer class="footer">
-          <span>Wardr runs on this device.</span>
+          <span>Wardr runs continuously on this device.</span>
           <a href="https://getwardr.com/" target="_blank" rel="noopener noreferrer">getwardr.com</a>
+          <button type="button" class="footer-link-btn" data-open-legal="privacy">Privacy Policy</button>
+          <button type="button" class="footer-link-btn" data-open-legal="terms">Terms of Use</button>
           <span id="last-scan">No scan recorded</span>
         </footer>
       </div>
     </main>
   </div>
+  <dialog class="dialog mission-dialog" id="mission-dialog" data-mode="scan" data-phase="running" data-rag="pending" aria-labelledby="mission-title">
+    <div class="mission-shell">
+      <div class="mission-stage">
+        <div class="mission-stage-top">
+          <span class="mission-badge" id="mission-badge"><span class="mission-dot" aria-hidden="true"></span><span id="mission-badge-text">Active scan</span></span>
+          <span class="mission-counter" id="mission-counter">0 / 0 layers</span>
+        </div>
+        <div class="mission-orb-wrap">
+          <div class="mission-orb" id="mission-orb" aria-hidden="true">
+            <span class="orb-ring orb-ring-outer"></span>
+            <span class="orb-ring orb-ring-inner"></span>
+            <span class="orb-ring orb-ring-dash"></span>
+            <span class="orb-sweep"></span>
+            <span class="orb-wave orb-wave-1"></span>
+            <span class="orb-wave orb-wave-2"></span>
+            <span class="orb-blip orb-blip-1"></span>
+            <span class="orb-blip orb-blip-2"></span>
+            <span class="orb-blip orb-blip-3"></span>
+            <span class="orb-blip orb-blip-4"></span>
+            <div class="orb-sparks">
+              <span class="orb-spark s1"></span><span class="orb-spark s2"></span><span class="orb-spark s3"></span><span class="orb-spark s4"></span>
+              <span class="orb-spark s5"></span><span class="orb-spark s6"></span><span class="orb-spark s7"></span><span class="orb-spark s8"></span>
+            </div>
+            <div class="orb-core">
+              <strong class="orb-pct" id="mission-pct">0%</strong>
+              <span class="orb-pct-label" id="mission-pct-label">SCANNING</span>
+              <svg class="orb-shield-svg" viewBox="0 0 100 112" focusable="false">
+                <path class="orb-shield-body" d="M50 5 L90 21 V55 C90 80 73 97 50 107 C27 97 10 80 10 55 V21 Z"></path>
+                <path class="orb-shield-check" d="M33 54 L45 66 L69 39"></path>
+                <g class="orb-shield-alert">
+                  <path d="M50 32 L50 56"></path>
+                  <circle cx="50" cy="70" r="4.5"></circle>
+                </g>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <h2 id="mission-title">Sweeping your device…</h2>
+        <p class="mission-ticker" id="mission-ticker">Initializing live security engines…</p>
+        <div class="mission-bar-wrap">
+          <progress class="mission-progress" id="mission-progress" value="0" max="100"></progress>
+          <span class="mission-bar-sheen" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <div class="mission-body">
+        <ul class="mission-steps" id="mission-steps"></ul>
+        <div class="mission-actions-panel" id="mission-actions-panel" hidden>
+          <div class="mission-actions-head">
+            <div>
+              <h3 id="mission-actions-title">Scan results</h3>
+              <p id="mission-actions-note"></p>
+            </div>
+            <button type="button" class="button button-protect-glow" id="mission-fix-all" hidden>
+              <span class="icon icon-defend" aria-hidden="true"></span>
+              <span id="mission-fix-all-label">Fix &amp; Protect Now</span>
+            </button>
+          </div>
+          <ul class="workflow-todo-list" id="mission-todo-list"></ul>
+        </div>
+        <div class="dialog-actions mission-footer">
+          <button type="button" class="button button-secondary" id="mission-open-report" hidden>View visual report</button>
+          <button type="button" class="button button-primary" id="close-mission-dialog">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog vrep-dialog" id="visual-report-dialog" data-rag="pending" aria-labelledby="vrep-title">
+    <div class="vrep-shell">
+      <div class="vrep-hero" id="vrep-hero" data-rag="pending">
+        <div class="vrep-shield-stage" aria-hidden="true">
+          <span class="vrep-halo"></span>
+          <span class="vrep-ring"></span>
+          <svg viewBox="0 0 100 112" focusable="false">
+            <path class="shield-body" d="M50 5 L90 21 V55 C90 80 73 97 50 107 C27 97 10 80 10 55 V21 Z"></path>
+            <path class="shield-glyph glyph-check" d="M34 53 L45 64 L67 40"></path>
+            <g class="shield-glyph glyph-alert">
+              <path d="M50 33 L50 56"></path>
+              <circle cx="50" cy="69" r="4"></circle>
+            </g>
+            <g class="shield-glyph glyph-scan">
+              <circle cx="36" cy="54" r="4"></circle>
+              <circle cx="50" cy="54" r="4"></circle>
+              <circle cx="64" cy="54" r="4"></circle>
+            </g>
+          </svg>
+        </div>
+        <div class="vrep-hero-text">
+          <div class="vrep-hero-top">
+            <span class="rag-pill">
+              <span class="rag-lights" aria-hidden="true">
+                <span class="rag-light rag-light-red"></span>
+                <span class="rag-light rag-light-amber"></span>
+                <span class="rag-light rag-light-green"></span>
+              </span>
+              <span id="vrep-rag-label">Scanning</span>
+            </span>
+            <span class="vrep-score-pill" id="vrep-score-pill">0%</span>
+          </div>
+          <h2 id="vrep-title">Security Protection Report</h2>
+          <p class="vrep-summary" id="vrep-summary"></p>
+          <p class="vrep-meta" id="vrep-meta"></p>
+          <div class="vrep-meter-wrap">
+            <div class="vrep-meter-row"><span>Securable checks protected</span><strong id="vrep-meter-text">—</strong></div>
+            <progress class="protection-meter" id="vrep-meter" value="0" max="1"></progress>
+          </div>
+        </div>
+      </div>
+
+      <div class="vrep-body">
+        <div class="vrep-threat-bar" id="vrep-threat-bar" data-threat-state="clear">
+          <span class="vrep-threat-dot" aria-hidden="true"></span>
+          <div>
+            <strong id="vrep-threat-title">No active threats detected right now</strong>
+            <p id="vrep-threat-detail"></p>
+          </div>
+        </div>
+
+        <div class="vrep-scoreboard">
+          <div class="vrep-tile tile-green"><span>Secured</span><strong id="vrep-count-secured">0</strong></div>
+          <div class="vrep-tile tile-red"><span>Needs action</span><strong id="vrep-count-action">0</strong></div>
+          <div class="vrep-tile tile-amber"><span>Unverified</span><strong id="vrep-count-unverified">0</strong></div>
+          <div class="vrep-tile tile-threats" id="vrep-tile-threats"><span>Active threats</span><strong id="vrep-count-threats">0</strong></div>
+        </div>
+
+        <div class="vrep-checklist-head">
+          <h3>Item-by-item security checklist</h3>
+          <button type="button" class="button button-protect-glow button-small" id="vrep-fix-all" hidden>
+            <span class="icon icon-defend" aria-hidden="true"></span>
+            <span id="vrep-fix-all-label">Fix &amp; Protect</span>
+          </button>
+        </div>
+        <div class="vrep-checklist" id="vrep-checklist"></div>
+
+        <div class="dialog-actions vrep-footer">
+          <button type="button" data-report="/report.html?download=1" class="button button-secondary">Download HTML / Print PDF</button>
+          <button type="button" data-report="/report.json?download=1" class="button button-secondary">Download JSON</button>
+          <button type="button" class="button button-primary" id="close-vrep-dialog">Close</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog scan-dialog" id="scan-dialog" aria-labelledby="scan-dialog-title">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <div>
+          <h2 id="scan-dialog-title">Choose scan depth</h2>
+          <p>Select how deeply Wardr inspects this device. Each level trades speed and CPU load against coverage depth.</p>
+        </div>
+      </div>
+      <div class="scan-options" id="scan-options" role="radiogroup" aria-label="Scan depth options"></div>
+      <p class="dialog-error" id="scan-dialog-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="cancel-scan-dialog">Cancel</button>
+        <button class="button button-primary" type="button" id="confirm-scan-dialog">Start Medium scan</button>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="dialog ai-dialog" id="ai-dialog" aria-labelledby="ai-dialog-title">
+    <form class="dialog-body" id="ai-config-form">
+      <h2 id="ai-dialog-title">Configure Active Protection AI</h2>
+      <p>Tier 1 local radar always runs continuously. Optionally add Tier 2 (free cloud offload with zero local CPU load) or Tier 3 (fully offline local cybersecurity models).</p>
+      <div class="ai-tier-selector" role="radiogroup" aria-label="Active AI tier">
+        <label class="ai-radio-card">
+          <input type="radio" name="ai-active-tier" value="radar">
+          <span><strong>Tier 1 only · Always-On Radar</strong><small>Deterministic scanning only. Zero AI CPU or network usage.</small></span>
+        </label>
+        <label class="ai-radio-card">
+          <input type="radio" name="ai-active-tier" value="cloud">
+          <span><strong>Tier 2 · Free Cloud AI Offload</strong><small>Zero local CPU/RAM load. Strictly PII-redacted before calling your free cloud API.</small></span>
+        </label>
+        <label class="ai-radio-card">
+          <input type="radio" name="ai-active-tier" value="local">
+          <span><strong>Tier 3 · Heavy Local AI (100% Offline)</strong><small>Runs open-source cybersecurity models directly on your hardware via Ollama.</small></span>
+        </label>
+      </div>
+
+      <fieldset class="ai-fieldset" id="ai-cloud-fieldset">
+        <legend>Tier 2 · Free Cloud AI Offload</legend>
+        <p class="ai-privacy-callout">Privacy guardrail: Wardr strips hostnames, usernames, home paths, IP addresses, emails, and secrets locally before sending any summary.</p>
+        <div class="ai-form-grid">
+          <label class="ai-field">
+            <span>Provider preset</span>
+            <select id="ai-cloud-preset"></select>
+          </label>
+          <label class="ai-field">
+            <span>Model name</span>
+            <input type="text" id="ai-cloud-model" maxlength="160" placeholder="fdtn-ai/Foundation-Sec-1.1-8B-Instruct">
+          </label>
+          <label class="ai-field ai-field-full">
+            <span>HTTPS API endpoint</span>
+            <input type="url" id="ai-cloud-endpoint" placeholder="https://router.huggingface.co/v1/chat/completions">
+          </label>
+          <label class="ai-field ai-field-full">
+            <span>Free API key <small id="ai-key-status"></small></span>
+            <input type="password" id="ai-cloud-key" maxlength="256" autocomplete="off" placeholder="Paste API key (stored locally with 0600 permissions)">
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="ai-fieldset" id="ai-local-fieldset">
+        <legend>Tier 3 · Heavy Local Cybersecurity Model</legend>
+        <p class="ai-ram-note" id="ai-ram-note">Detecting device memory…</p>
+        <div class="ai-local-list" id="ai-local-list"></div>
+      </fieldset>
+
+      <p class="dialog-error" id="ai-dialog-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="cancel-ai-dialog">Close</button>
+        <button class="button button-primary" type="submit" id="save-ai-dialog">Save AI settings</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog class="dialog mission-dialog pentest-dialog" id="pentest-dialog" data-mode="scan" data-phase="running" data-rag="pending" aria-labelledby="pentest-modal-title">
+    <div class="mission-shell">
+      <div class="mission-stage">
+        <div class="mission-stage-top">
+          <span class="mission-badge"><span class="mission-dot" aria-hidden="true"></span><span id="pentest-modal-badge">Self-Pen-Test Simulation</span></span>
+          <span class="mission-counter" id="pentest-modal-counter">0 / 6 probes</span>
+        </div>
+        <div class="mission-orb-wrap">
+          <div class="mission-orb" aria-hidden="true">
+            <span class="orb-ring orb-ring-outer"></span>
+            <span class="orb-ring orb-ring-inner"></span>
+            <span class="orb-ring orb-ring-dash"></span>
+            <span class="orb-sweep"></span>
+            <span class="orb-wave orb-wave-1"></span>
+            <span class="orb-wave orb-wave-2"></span>
+            <span class="orb-blip orb-blip-1"></span>
+            <span class="orb-blip orb-blip-2"></span>
+            <span class="orb-blip orb-blip-3"></span>
+            <span class="orb-blip orb-blip-4"></span>
+            <div class="orb-sparks">
+              <span class="orb-spark s1"></span><span class="orb-spark s2"></span><span class="orb-spark s3"></span><span class="orb-spark s4"></span>
+              <span class="orb-spark s5"></span><span class="orb-spark s6"></span><span class="orb-spark s7"></span><span class="orb-spark s8"></span>
+            </div>
+            <div class="orb-core">
+              <strong class="orb-pct" id="pentest-modal-pct">0%</strong>
+              <span class="orb-pct-label" id="pentest-modal-pct-label">PROBING</span>
+              <svg class="orb-shield-svg" viewBox="0 0 100 112" focusable="false">
+                <path class="orb-shield-body" d="M50 5 L90 21 V55 C90 80 73 97 50 107 C27 97 10 80 10 55 V21 Z"></path>
+                <path class="orb-shield-check" d="M33 54 L45 66 L69 39"></path>
+                <g class="orb-shield-alert">
+                  <path d="M50 32 L50 56"></path>
+                  <circle cx="50" cy="70" r="4.5"></circle>
+                </g>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <h2 id="pentest-modal-title">Running safe local attack simulations…</h2>
+        <p class="mission-ticker" id="pentest-modal-ticker">Strictly local, non-destructive probes — zero external hosts contacted.</p>
+        <div class="mission-bar-wrap">
+          <progress class="mission-progress" id="pentest-modal-progress" max="100" value="6"></progress>
+          <span class="mission-bar-sheen" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <div class="mission-body">
+        <ol class="workflow-steps mission-steps" id="pentest-modal-steps"></ol>
+        <div class="mission-actions-panel" id="pentest-actions-panel" hidden>
+          <div class="mission-actions-head">
+            <div>
+              <h3 id="pentest-actions-title">Simulation findings</h3>
+              <p id="pentest-actions-note"></p>
+            </div>
+            <button type="button" class="button button-protect-glow" id="pentest-fix-all" hidden>
+              <span class="icon icon-defend" aria-hidden="true"></span>
+              <span id="pentest-fix-all-label">FIX &amp; HARDEN ALL</span>
+            </button>
+          </div>
+          <ul class="workflow-todo-list" id="pentest-todo-list"></ul>
+        </div>
+        <div class="dialog-actions mission-footer">
+          <button class="button button-secondary" type="button" id="view-pentest-results" hidden>Inspect Pen-Test Lab</button>
+          <button class="button button-primary" type="button" id="close-pentest-dialog">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <dialog class="dialog script-dialog" id="script-confirm-dialog" aria-labelledby="script-dialog-title">
+    <div class="dialog-body">
+      <div class="card-icon"><span class="icon icon-defend" aria-hidden="true"></span></div>
+      <h2 id="script-dialog-title">Run allowlisted fix script?</h2>
+      <p id="script-dialog-note">Review the exact allowlisted command(s) Wardr will run. Your operating system will prompt for Touch ID or administrator approval where required.</p>
+      <ul class="script-cmd-list" id="script-cmd-list"></ul>
+      <p class="dialog-error" id="script-dialog-error" role="status" hidden></p>
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="cancel-script-dialog">Cancel</button>
+        <button class="button button-protect-glow" type="button" id="confirm-script-dialog">Apply &amp; Protect Now</button>
+      </div>
+    </div>
+  </dialog>
   <dialog class="dialog" id="fix-dialog" aria-labelledby="fix-title">
     <div class="dialog-body">
       <div class="card-icon"><span class="icon icon-check" aria-hidden="true"></span></div>
@@ -273,6 +921,165 @@
       </div>
     </div>
   </dialog>
+  <dialog class="dialog whats-new-dialog" id="whats-new-dialog" aria-labelledby="whats-new-title">
+    <div class="whats-new-head">
+      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.0</span>
+      <h2 id="whats-new-title">What’s New in Wardr</h2>
+      <p id="whats-new-summary">Security upgrades, new protections, and improvements in this release.</p>
+    </div>
+    <div class="dialog-body">
+      <ul class="whats-new-list" id="whats-new-list"></ul>
+      <div class="dialog-actions">
+        <button class="button button-primary" type="button" id="dismiss-whats-new">Got it — continue</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog auth-dialog" id="auth-gate-dialog" aria-labelledby="auth-gate-title">
+    <div class="auth-hero">
+      <div class="auth-brand"><span class="brand-mark" aria-hidden="true"><span></span></span><span>wardr<span class="brand-period">.</span></span></div>
+      <h2 id="auth-gate-title">Sign in or create your Wardr account</h2>
+      <p>Connect to Wardr for signed security updates, support, and optional privacy-first threat intelligence.</p>
+    </div>
+    <div class="dialog-body auth-body">
+      <div class="sso-buttons">
+        <button type="button" class="button button-sso" id="sso-google-btn" data-sso="google">
+          <svg class="sso-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"></path>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.87-3c-1.07.72-2.45 1.15-4.06 1.15-3.12 0-5.77-2.11-6.71-4.95H1.3v3.1A12 12 0 0 0 12 24z"></path>
+            <path fill="#FBBC05" d="M5.29 14.29A7.21 7.21 0 0 1 4.91 12c0-.8.14-1.57.38-2.29V6.61H1.3A12 12 0 0 0 0 12c0 1.94.46 3.77 1.3 5.39l3.99-3.1z"></path>
+            <path fill="#EA4335" d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.3 6.61l3.99 3.1C6.23 6.87 8.88 4.76 12 4.76z"></path>
+          </svg>
+          <span>Continue with Google</span>
+        </button>
+        <button type="button" class="button button-sso" id="sso-microsoft-btn" data-sso="microsoft">
+          <svg class="sso-icon" viewBox="0 0 21 21" aria-hidden="true" focusable="false">
+            <rect x="1" y="1" width="9" height="9" fill="#F25022"></rect>
+            <rect x="11" y="1" width="9" height="9" fill="#7FBA00"></rect>
+            <rect x="1" y="11" width="9" height="9" fill="#00A4EF"></rect>
+            <rect x="11" y="11" width="9" height="9" fill="#FFB900"></rect>
+          </svg>
+          <span>Continue with Microsoft</span>
+        </button>
+      </div>
+      <div class="auth-divider"><span>or use email</span></div>
+      <div class="audience-toggle auth-mode-toggle" role="group" aria-label="Account mode">
+        <button type="button" class="audience-pill" data-auth-mode="register" aria-pressed="true">Create account</button>
+        <button type="button" class="audience-pill" data-auth-mode="login" aria-pressed="false">Sign in</button>
+      </div>
+      <form id="auth-form" class="auth-form">
+        <label class="ai-field" id="auth-name-wrap">
+          <span>Full name</span>
+          <input type="text" id="auth-name" maxlength="80" autocomplete="name" placeholder="Your name">
+        </label>
+        <label class="ai-field">
+          <span>Work or personal email</span>
+          <input type="email" id="auth-email" maxlength="254" autocomplete="email" required placeholder="you@company.com">
+        </label>
+        <label class="ai-field">
+          <span>Password <small id="auth-password-hint">(10+ characters)</small></span>
+          <input type="password" id="auth-password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="Choose a strong password">
+        </label>
+
+        <div class="auth-consent-box" id="auth-consent-box">
+          <label class="consent-check">
+            <input type="checkbox" id="auth-accept-legal">
+            <span>I agree to the <button type="button" class="inline-link-btn" data-open-legal="privacy">Privacy Policy</button> and <button type="button" class="inline-link-btn" data-open-legal="terms">Terms of Use</button>.</span>
+          </label>
+          <label class="consent-check consent-opt">
+            <input type="checkbox" id="auth-opt-diagnostics">
+            <span><strong>Opt in to redacted system diagnostics</strong> — share sanitized OS &amp; health info for debugging, support, and reliability updates.</span>
+          </label>
+          <label class="consent-check consent-opt">
+            <input type="checkbox" id="auth-opt-threats">
+            <span><strong>Opt in to redacted threat intelligence</strong> — share hashed threat &amp; compromised-package signals to protect the Wardr community faster.</span>
+          </label>
+        </div>
+
+        <p class="dialog-error" id="auth-error" role="status" hidden></p>
+        <div class="dialog-actions">
+          <button type="submit" class="button button-primary" id="auth-submit-btn">Create Wardr account</button>
+        </div>
+      </form>
+
+      <p class="auth-enterprise-note"><strong>Business &amp; Enterprise:</strong> Custom SAML / Okta / Entra ID SSO &amp; centralized fleet auth are available in Wardr Business &amp; Enterprise.</p>
+      <p class="auth-offline-note">Air-gapped researcher? Launch with <code>wardr serve --offline</code> for fully offline local operation.</p>
+    </div>
+  </dialog>
+
+  <dialog class="dialog account-dialog" id="account-dialog" aria-labelledby="account-dialog-title">
+    <div class="dialog-body">
+      <div class="section-heading">
+        <div>
+          <h2 id="account-dialog-title">Account, Privacy &amp; Diagnostics</h2>
+          <p id="account-dialog-subtitle">Manage your Wardr account connection and opt-in telemetry preferences.</p>
+        </div>
+        <span class="status-label" id="account-provider-pill" data-tone="pass">Connected</span>
+      </div>
+      <dl class="update-versions" id="account-profile-dl">
+        <div><dt>Account</dt><dd id="acct-display-name">—</dd></div>
+        <div><dt>Email</dt><dd id="acct-display-email">—</dd></div>
+        <div><dt>Server</dt><dd id="acct-display-server">—</dd></div>
+      </dl>
+
+      <fieldset class="ai-fieldset">
+        <legend>Opt-In Telemetry &amp; Support Updates (Strictly Redacted)</legend>
+        <p class="ai-privacy-callout"><strong>Privacy guarantee:</strong> Usernames, hostnames, home paths, IPs, emails, and API keys are stripped locally before anything leaves this device. When opted in, redacted summaries sync automatically after completed scans.</p>
+        <div class="acct-toggles">
+          <label class="consent-check">
+            <input type="checkbox" id="pref-diagnostics">
+            <span><strong>Share redacted system &amp; scan diagnostics</strong> — OS, architecture, check pass/fail status &amp; pen-test scores (no paths or evidence) so we can ship better security updates.</span>
+          </label>
+          <label class="consent-check">
+            <input type="checkbox" id="pref-threats">
+            <span><strong>Share redacted threat &amp; package signals</strong> — exposed risky port types, hashed threat indicators &amp; compromised package detections to protect everyone faster.</span>
+          </label>
+          <label class="consent-check">
+            <input type="checkbox" id="pref-updates">
+            <span><strong>Automatic Ed25519-verified update checks</strong> — check for signed security releases.</span>
+          </label>
+        </div>
+        <p class="muted-note" id="acct-sync-status"></p>
+        <div class="finding-actions">
+          <button type="button" class="button button-secondary button-small" id="preview-telemetry-btn">Preview redacted payload</button>
+          <button type="button" class="button button-primary button-small" id="sync-telemetry-btn">Sync diagnostics now</button>
+        </div>
+        <pre id="telemetry-preview-box" class="report-preview" hidden></pre>
+      </fieldset>
+
+      <p class="dialog-error" id="account-dialog-error" role="status" hidden></p>
+      <div class="dialog-actions account-footer">
+        <div class="account-legal-links">
+          <button type="button" class="footer-link-btn" data-open-legal="privacy">Privacy Policy</button>
+          <button type="button" class="footer-link-btn" data-open-legal="terms">Terms of Use</button>
+        </div>
+        <div class="account-footer-right">
+          <button type="button" class="button button-secondary" id="account-signout-btn">Sign out</button>
+          <button type="button" class="button button-primary" id="close-account-dialog">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog legal-dialog" id="legal-dialog" aria-labelledby="legal-dialog-title">
+    <div class="dialog-body">
+      <div class="section-heading">
+        <div>
+          <h2 id="legal-dialog-title">Privacy Policy &amp; Terms of Use</h2>
+          <p id="legal-dialog-meta">Policy version 2026-11-22</p>
+        </div>
+        <div class="audience-toggle" role="group" aria-label="Legal document">
+          <button type="button" class="audience-pill" data-legal-tab="privacy" aria-pressed="true">Privacy Policy</button>
+          <button type="button" class="audience-pill" data-legal-tab="terms" aria-pressed="false">Terms of Use</button>
+        </div>
+      </div>
+      <div class="legal-content" id="legal-content"></div>
+      <div class="dialog-actions">
+        <button type="button" class="button button-primary" id="close-legal-dialog">Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog class="dialog updates-dialog" id="updates-dialog" aria-labelledby="updates-title">
     <div class="dialog-body">
       <h2 id="updates-title">Wardr updates</h2>

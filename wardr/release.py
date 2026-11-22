@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import json
 import re
-import subprocess
 from pathlib import Path
 
 
@@ -29,24 +28,33 @@ def _read_bounded(path, maximum):
     return payload
 
 
-def _openssl(arguments):
-    try:
-        return subprocess.run(
-            ["openssl", *map(str, arguments)], stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ReleaseError("Release signatures require a working OpenSSL 3 command.") from exc
-
-
 def sign_manifest(manifest, signing_key, signature, public_key):
-    args = ("pkeyutl", "-sign", "-rawin", "-inkey", signing_key, "-in", manifest, "-out", signature)
-    if _openssl(args).returncode:
-        raise ReleaseError("OpenSSL could not sign the release manifest.")
-    if Path(signature).stat().st_size != 64:
+    """Sign a release manifest using PyCA cryptography Ed25519 (no external openssl subprocess)."""
+    manifest_bytes = _read_bounded(manifest, 64 * 1024)
+    key_bytes = _read_bounded(signing_key, 4096)
+    try:
+        from cryptography.exceptions import UnsupportedAlgorithm
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PublicFormat, load_pem_private_key,
+        )
+    except ImportError as exc:
+        raise ReleaseError("The release signing library is unavailable. Reinstall Wardr in its environment.") from exc
+    try:
+        private_key = load_pem_private_key(key_bytes, password=None)
+        if not isinstance(private_key, Ed25519PrivateKey):
+            raise ValueError("Expected an Ed25519 signing key")
+    except (UnsupportedAlgorithm, ValueError, TypeError) as exc:
+        raise ReleaseError("Use an unencrypted Ed25519 release signing key in PEM format.") from exc
+    sig_bytes = private_key.sign(manifest_bytes)
+    if len(sig_bytes) != 64:
         raise ReleaseError("Use an Ed25519 release signing key.")
-    if _openssl(("pkey", "-in", signing_key, "-pubout", "-out", public_key)).returncode:
-        raise ReleaseError("OpenSSL could not export the release public key.")
+    Path(signature).write_bytes(sig_bytes)
+    pub_pem = private_key.public_key().public_bytes(
+        encoding=Encoding.PEM,
+        format=PublicFormat.SubjectPublicKeyInfo,
+    )
+    Path(public_key).write_bytes(pub_pem)
 
 
 def verify_manifest_signature(manifest_bytes, signature_bytes, public_key_bytes):

@@ -23,8 +23,10 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
   Ed25519 feed schemas, and clustering intake server.
 - [Development and operations](docs/DEVELOPMENT.md) covers running from
   source, troubleshooting, native checks, builds, and the release workflow.
-- [Security policy](SECURITY.md) covers vulnerability reporting and release
-  verification.
+- [Security policy](SECURITY.md) covers vulnerability reporting, release
+  verification, and our [full Security Audit Report](docs/security-audit.md).
+- [Privacy Policy](PRIVACY.md) and [Terms of Use](TERMS.md) document Wardr's
+  local-first privacy guarantees, opt-in redacted telemetry, and authorized-use scope.
 - [Signing handoff](docs/HANDOFF_SIGNING_MOVE.md) records the decision to sign
   Wardr's installers in this repository and the work left to do.
 - [Company site repository](https://github.com/Luminary-Analytics/wardr-site)
@@ -62,9 +64,37 @@ as the account whose security settings you want to check.
 
 ## Dashboard
 
-Wardr prints a private loopback launch link. It scans on startup and hourly
-while the dashboard service runs. Select **Run scan** for an immediate refresh.
+Wardr prints a private single-use loopback launch link (exchanged once via
+`POST /api/auth/exchange` for a session token). It scans on startup and hourly
+while the dashboard service runs. Select **Run scan** to pick **Light**,
+**Medium**, or **Heavy / Deep** scan depth with live progress, trade-off
+warnings, and one-click **Fix & Protect All**.
 
+- **Overview & Visual Security Report** provides a Red / Amber / Green Shield
+  verdict, continuous sweeping radar, active threats panel, Protection Coverage
+  meter (with transparent **Queued · Pending restart** and **Mark handled**
+  dispositions), **3-Tier AI Protection** (Tier 1 Always-On Local Radar, Tier 2
+  Free Cloud AI Offload with local PII redaction, and Tier 3 Heavy Local AI via
+  Ollama), and an interactive printable RAG Visual Security Report.
+- **Defense — What We Defend & Pen-Test Lab** combines a **Dual-View Threat
+  Defense Matrix** (toggle between **Everyday view** and **Technical view** with
+  MITRE ATT&CK / OWASP mappings) and an **Authorized Local Self-Pen-Test Lab**
+  that runs 6 strictly local, non-destructive probes (exposed AI/database ports,
+  infostealer secret-permission harvest, startup backdoors, `$PATH` hijacks,
+  firewall boundaries, and a live SHA-256 tamper & threat-hunting canary) with
+  Kill-Chain Attack Path analysis and one-click **Fix & Harden All**.
+- **Defense — Software & Supply-Chain Scanner** scans local repositories,
+  lockfiles, global npm modules, and runtimes for **30+ compromised npm packages**
+  (including 2025 waves like `nx`, `chalk`/`debug`, `@ctrl/tinycolor`),
+  malicious `postinstall` hooks, **React2Shell (CVE-2025-55182)**,
+  **PHP-CGI / PHP2Shell (CVE-2024-4577)** + PHP webshells, **Next.js middleware
+  bypass (CVE-2025-29927)**, **Log4Shell (CVE-2021-44228)**, and **Polyfill.io**,
+  alongside CycloneDX + OSV + CISA KEV advisory matching.
+- **Accounts, Google/Microsoft OAuth & What's New?** supports Wardr accounts
+  (Google & Microsoft OAuth 2.0 PKCE `S256` + salted `scrypt` email auth),
+  explicit Privacy Policy / Terms consent, strictly opt-in redacted telemetry
+  with live payload preview, and a versioned **What's New?** modal after updates
+  (plus `wardr serve --offline` for air-gapped security researchers).
 - **Checklist** shows the risk, evidence, and next step for each check,
   including OS hardening, local credential permissions (`~/.ssh`, `~/.aws`,
   `~/.kube`, `~/.gnupg`, `~/.docker`), and local AI/MCP security hygiene.
@@ -73,16 +103,6 @@ while the dashboard service runs. Select **Run scan** for an immediate refresh.
   Any failed finding also offers **Report to Wardr**, which strips hostnames,
   usernames, home paths, IPs, emails, and secrets locally before previewing
   the redacted report for optional submission or offline JSON export.
-- **Defense** brings together a prioritized plan, local TCP listeners and UDP
-  bindings, attack-surface warnings for exposed databases and local AI
-  endpoints, persistent baseline-drift and Ed25519-signed Rapid-Defense Feed
-  hunting rules, and software version matches.
-- **Software** supports one-click **Auto-scan installed software** (fast,
-  incremental CycloneDX discovery for Python, Homebrew, Debian/Ubuntu, and
-  Alpine matched against verified Rapid-Defense Feed advisories) as well as
-  manual CycloneDX JSON + OSV JSON uploads. CISA catalog membership increases
-  priority for an existing version match.
-  [CycloneDX](https://cyclonedx.org/specification/overview/) · [OSV schema](https://ossf.github.io/osv-schema/)
 - **Events** shows the monitor's available sources, persistent host baseline
   drift, and up to 2,000 retained local observations. Hunting alerts link to
   specific events, support declarative signed feed rules, and offer one-click

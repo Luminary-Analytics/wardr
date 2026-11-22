@@ -1,4 +1,5 @@
 include design/render_mark.py design/wardr-mark.blend design/wardr-triposr.glb
-include LICENSE SECURITY.md
+include LICENSE SECURITY.md PRIVACY.md TERMS.md
 recursive-include docs *.md
+recursive-include deploy *
 exclude tests/test_release_automation.py

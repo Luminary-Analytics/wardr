@@ -71,8 +71,20 @@ def _uv_executable():
         try:
             if candidate.is_absolute() and candidate.is_file():
                 resolved = candidate.resolve(strict=True)
-                if sys.platform != "win32" or resolved.suffix.lower() == ".exe":
-                    return str(resolved)
+                if sys.platform == "win32":
+                    if resolved.suffix.lower() == ".exe":
+                        return str(resolved)
+                else:
+                    st_bin = resolved.stat()
+                    st_dir = resolved.parent.stat()
+                    trusted_uids = {0, os.geteuid()}
+                    if (
+                        st_bin.st_uid in trusted_uids
+                        and st_dir.st_uid in trusted_uids
+                        and (st_bin.st_mode & 0o022) == 0
+                        and (st_dir.st_mode & 0o022) == 0
+                    ):
+                        return str(resolved)
         except OSError:
             pass
     return None

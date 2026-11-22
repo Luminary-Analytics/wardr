@@ -342,6 +342,7 @@ class Monitor:
         self._launch_items = None
         self._last_poll = None
         self._last_sample = None
+        self._poll_count = 0
         self._history_path = Path(state_dir) / "monitor-events.sqlite3" if state_dir is not None else None
         self._history_detail = None
         self._events = self._load_history()
@@ -547,6 +548,7 @@ class Monitor:
                 self._coverage = coverage
                 self._last_poll = _utc()
                 self._last_sample = now
+                self._poll_count += 1
 
                 existing = {event["id"] for event in self._events}
                 new_events = list({event["id"]: event for event in events if event["id"] not in existing}.values())
@@ -570,6 +572,7 @@ class Monitor:
                 "running": bool(self._thread and self._thread.is_alive() and not self._stop.is_set()),
                 "interval": self.interval,
                 "last_poll": self._last_poll,
+                "poll_count": self._poll_count,
                 "coverage": [item.copy() for item in self._coverage],
                 "events": [event.copy() for event in self._events],
                 "history_persistent": self._history_path is not None and self._history_detail is None,

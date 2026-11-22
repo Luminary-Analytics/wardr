@@ -1,10 +1,16 @@
 # Wardr security
 
 Wardr Community uses the MIT License. Wardr's local dashboard accepts authenticated
-requests on loopback. The assessment engine reads local security settings, socket
-tables, event records, and inventory files. Confirmed repairs are limited to the
-allowlisted SSH permissions checks. The optional model receives a bounded set of
-plan labels and cannot run commands, change settings, or initiate connections.
+requests on IPv4 loopback (`127.0.0.1`) with strict `Host`, `Origin`, constant-time
+token verification, and a strict Content Security Policy (zero inline scripts or styles).
+The assessment engine reads local security settings, socket tables, event records,
+self-pen-test probes, and local supply-chain manifests without transmitting secrets.
+
+- **Security Audit Report:** See [docs/security-audit.md](docs/security-audit.md) for our
+  full adversarial codebase audit, threat model controls, and applied remediations.
+- **Privacy Policy & Terms of Use:** See [PRIVACY.md](PRIVACY.md) and [TERMS.md](TERMS.md).
+- **Offline / Air-Gapped Mode:** Run `wardr serve --offline` to disable all outbound
+  network requests, account sync, advisory downloads, and optional cloud AI.
 
 Use a current, trusted build and keep the dashboard launch link private. An
 offline model can be prepared while connected and used through the local Ollama

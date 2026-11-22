@@ -172,8 +172,10 @@ def _parse_feed_document(feed_bytes: bytes) -> dict:
         if parsed_time.tzinfo is None:
             raise ValueError("Feed published_at must include a timezone.")
 
-        raw_rules = doc.get("rules", [])
-        raw_advisories = doc.get("advisories", [])
+        if "rules" not in doc or "advisories" not in doc:
+            raise ValueError("Defense feed must explicitly include rules and advisories collections.")
+        raw_rules = doc["rules"]
+        raw_advisories = doc["advisories"]
         if not isinstance(raw_rules, list) or len(raw_rules) > _MAX_RULES:
             raise ValueError("Invalid defense feed rules collection.")
         if not isinstance(raw_advisories, list) or len(raw_advisories) > _MAX_ADVISORIES:
@@ -247,6 +249,8 @@ def _atomic_save(state_dir: Path, payload: dict) -> None:
     descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=".feed-", suffix=".json")
     temporary = Path(name)
     try:
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
             handle.write("\n")
@@ -279,6 +283,7 @@ def import_feed(
     sig_bytes = _read_file_bounded(signature_path, 64)
     key_bytes = _read_file_bounded(public_key_path, 2048) if public_key_path is not None else None
     verified = verify_feed_bytes(feed_bytes, sig_bytes, key_bytes)
+    _enforce_monotonic_freshness(state_dir, verified)
     try:
         _atomic_save(state_dir, verified)
     except OSError as exc:
@@ -304,10 +309,23 @@ def _https_get(path: str, limit: int) -> bytes:
             if len(chunks) > limit:
                 raise FeedError("Rapid-Defense Feed exceeded size limit.")
         raise FeedError("Rapid-Defense Feed download timed out.")
-    except OSError as exc:
+    except (OSError, http.client.HTTPException) as exc:
         raise FeedError("Could not reach the Wardr Rapid-Defense Feed server.") from exc
     finally:
         connection.close()
+
+
+def _enforce_monotonic_freshness(state_dir: Path, verified: dict) -> None:
+    existing = _load_cached(state_dir)
+    if not existing or not isinstance(existing.get("published_at"), str):
+        return
+    try:
+        old_dt = datetime.fromisoformat(existing["published_at"].replace("Z", "+00:00"))
+        new_dt = datetime.fromisoformat(verified["published_at"].replace("Z", "+00:00"))
+    except ValueError:
+        return
+    if new_dt < old_dt:
+        raise FeedError("Refused older Rapid-Defense Feed (anti-rollback protection).")
 
 
 def refresh_feed(state_dir: Path, *, public_key_bytes: bytes | None = None) -> dict:
@@ -315,6 +333,7 @@ def refresh_feed(state_dir: Path, *, public_key_bytes: bytes | None = None) -> d
     feed_bytes = _https_get(FEED_PATH, _MAX_FEED_BYTES)
     sig_bytes = _https_get(FEED_SIG_PATH, 64)
     verified = verify_feed_bytes(feed_bytes, sig_bytes, public_key_bytes)
+    _enforce_monotonic_freshness(state_dir, verified)
     try:
         _atomic_save(state_dir, verified)
     except OSError as exc:

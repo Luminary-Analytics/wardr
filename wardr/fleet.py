@@ -21,6 +21,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 from . import remediation
@@ -265,20 +266,25 @@ class FleetStore:
     def authenticate_operator(self, username: str, password: str) -> dict | None:
         if not isinstance(username, str) or not isinstance(password, str):
             return None
-        with self._lock, closing(self._connect()) as conn, conn:
+        with self._lock, closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT role, pw_salt, pw_hash, disabled FROM operators WHERE username = ?",
                 (username,),
             ).fetchone()
-            if row is None or row[3]:
-                return None
-            role, salt, expected_hash, _ = row
-            _, computed = _hash_password(password, salt)
-            if not hmac.compare_digest(computed, expected_hash):
-                return None
-            raw_token = secrets.token_urlsafe(32)
-            now = _utc_now()
-            expires = now + timedelta(hours=_SESSION_TTL_HOURS)
+        # Run PBKDF2 outside the global lock and execute a constant-work dummy derivation
+        # when the account does not exist or is disabled to eliminate lock DoS and timing oracles.
+        if row is None or row[3]:
+            _hash_password(password, "0" * 32)
+            return None
+        role, salt, expected_hash, _ = row
+        _, computed = _hash_password(password, salt)
+        if not hmac.compare_digest(computed, expected_hash):
+            return None
+        raw_token = secrets.token_urlsafe(32)
+        now = _utc_now()
+        expires = now + timedelta(hours=_SESSION_TTL_HOURS)
+        with self._lock, closing(self._connect()) as conn, conn:
+            conn.execute("DELETE FROM sessions WHERE expires_at < ?", (_iso(now),))
             conn.execute(
                 "INSERT INTO sessions (token_hash, username, role, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
                 (_sha256_hex(raw_token), username, role, _iso(now), _iso(expires)),
@@ -580,7 +586,11 @@ class FleetStore:
     def record_command_result(self, host_id: str, command_id: str, *, ok: bool, result: dict) -> dict:
         now_iso = _iso()
         status = "completed" if ok else "failed"
-        safe_result = json.dumps(result if isinstance(result, dict) else {"message": str(result)}, ensure_ascii=True)[:16384]
+        raw_json = json.dumps(result if isinstance(result, dict) else {"message": str(result)}, ensure_ascii=True)
+        if len(raw_json) > 16384:
+            safe_result = json.dumps({"truncated": True, "preview": raw_json[:15500]}, ensure_ascii=True)
+        else:
+            safe_result = raw_json
         with self._lock, closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT action, params_json FROM commands WHERE command_id = ? AND host_id = ?",
@@ -615,6 +625,8 @@ class FleetStore:
 
         with self._lock, closing(self._connect()) as conn, conn:
             if host_ids:
+                if not isinstance(host_ids, list) or len(host_ids) > 500 or not all(isinstance(h, str) and len(h) <= 64 for h in host_ids):
+                    raise ValueError("Provide up to 500 valid string host IDs.")
                 placeholders = ",".join("?" for _ in host_ids)
                 rows = conn.execute(
                     f"SELECT host_id, hostname FROM hosts WHERE revoked = 0 AND host_id IN ({placeholders})",
@@ -794,12 +806,20 @@ class FleetStore:
         ]
         correlations.sort(key=lambda e: (sev_rank.get(e["severity"], 4), -e["host_count"], e["title"]))
 
+        def _safe_parse(val):
+            if not val:
+                return None
+            try:
+                return json.loads(val)
+            except ValueError:
+                return {"raw": str(val)[:200]}
+
         commands = [
             {
                 "command_id": r[0], "host_id": r[1], "action": r[2],
-                "params": json.loads(r[3]), "status": r[4], "created_by": r[5],
+                "params": _safe_parse(r[3]) or {}, "status": r[4], "created_by": r[5],
                 "created_at": r[6], "completed_at": r[7],
-                "result": json.loads(r[8]) if r[8] else None,
+                "result": _safe_parse(r[8]),
             }
             for r in recent_cmds
         ]
@@ -841,6 +861,14 @@ class FleetStore:
                 (host_id,),
             ).fetchall()
         snap = json.loads(row[13]) if row[13] else {}
+        def _safe_parse_cmd(val):
+            if not val:
+                return None
+            try:
+                return json.loads(val)
+            except ValueError:
+                return {"raw": str(val)[:200]}
+
         return {
             "host_id": row[0],
             "hostname": row[1],
@@ -858,9 +886,9 @@ class FleetStore:
             "snapshot": snap,
             "commands": [
                 {
-                    "command_id": c[0], "action": c[1], "params": json.loads(c[2]), "status": c[3],
+                    "command_id": c[0], "action": c[1], "params": _safe_parse_cmd(c[2]) or {}, "status": c[3],
                     "created_by": c[4], "created_at": c[5], "completed_at": c[6],
-                    "result": json.loads(c[7]) if c[7] else None,
+                    "result": _safe_parse_cmd(c[7]),
                 }
                 for c in cmds
             ],
@@ -924,12 +952,33 @@ th,td{{text-align:left;padding:8px 10px;border-bottom:1px solid #d7e0d2}}
 """
 
 
+class _AuthRateLimiter:
+    def __init__(self, limit: int = 12, window: float = 60.0):
+        self.limit = limit
+        self.window = window
+        self._lock = threading.Lock()
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        cutoff = now - self.window
+        with self._lock:
+            bucket = [t for t in self._hits.get(key, []) if t > cutoff]
+            if len(bucket) >= self.limit:
+                self._hits[key] = bucket
+                return False
+            bucket.append(now)
+            self._hits[key] = bucket
+            return True
+
+
 class FleetServer(ThreadingHTTPServer):
     allow_reuse_address = os.name == "posix"
     daemon_threads = True
 
     def __init__(self, bind_address: tuple[str, int], store: FleetStore):
         self.store = store
+        self.auth_limiter = _AuthRateLimiter(limit=12, window=60.0)
         self.page = (STATIC / "fleet.html").read_bytes()
         self.assets = {url: ((STATIC / name).read_bytes(), kind) for url, (name, kind) in _FLEET_ASSETS.items()}
         super().__init__(bind_address, _FleetHandler)
@@ -939,6 +988,10 @@ class _FleetHandler(BaseHTTPRequestHandler):
     server: FleetServer
     server_version = "WardrFleet"
     sys_version = ""
+
+    def setup(self) -> None:
+        self.request.settimeout(30)
+        super().setup()
 
     def log_message(self, format, *args):
         pass
@@ -952,6 +1005,7 @@ class _FleetHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         if download:
             self.send_header("Content-Disposition", f'attachment; filename="{download}"')
         self.end_headers()
@@ -984,12 +1038,18 @@ class _FleetHandler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             raise ValueError("Send application/json.")
         lengths = self.headers.get_all("Content-Length") or []
-        if len(lengths) != 1 or not lengths[0].isdecimal():
+        if (
+            len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal()
+            or len(lengths[0]) > len(str(limit)) or "Transfer-Encoding" in self.headers
+        ):
             raise ValueError("Invalid Content-Length.")
         size = int(lengths[0])
         if not 0 < size <= limit:
             raise OverflowError("Request payload exceeds limit.")
-        parsed = json.loads(self.rfile.read(size))
+        try:
+            parsed = json.loads(self.rfile.read(size))
+        except (ValueError, RecursionError, OSError) as exc:
+            raise ValueError("Invalid JSON payload.") from exc
         if not isinstance(parsed, dict):
             raise ValueError("Expected a JSON object.")
         return parsed
@@ -1007,8 +1067,7 @@ class _FleetHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, content, kind)
             return
         if path == "/api/fleet/health":
-            ov = self.server.store.overview()
-            self._json(HTTPStatus.OK, {"ok": True, "summary": ov["summary"]})
+            self._json(HTTPStatus.OK, {"ok": True})
             return
 
         if path == "/api/fleet/me":
@@ -1072,6 +1131,10 @@ class _FleetHandler(BaseHTTPRequestHandler):
         try:
             # --- Public Auth & Device Enrollment / Agent Endpoints ---
             if path == "/api/fleet/login":
+                client_ip = (self.client_address[0] if self.client_address else "unknown")
+                if not self.server.auth_limiter.allow(f"login:{client_ip}"):
+                    self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many sign-in attempts. Wait a minute and try again."})
+                    return
                 body = self._read_json(4096)
                 session = self.server.store.authenticate_operator(body.get("username"), body.get("password"))
                 if session is None:
@@ -1084,6 +1147,10 @@ class _FleetHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, {"ok": True})
                 return
             if path == "/api/fleet/enroll":
+                client_ip = (self.client_address[0] if self.client_address else "unknown")
+                if not self.server.auth_limiter.allow(f"enroll:{client_ip}"):
+                    self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many enrollment attempts. Wait a minute and try again."})
+                    return
                 body = self._read_json(16384)
                 self._json(HTTPStatus.CREATED, self.server.store.enroll_host(body))
                 return

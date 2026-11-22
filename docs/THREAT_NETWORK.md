@@ -119,7 +119,9 @@ wardr --state-dir /var/lib/wardr-tn threat-network \
 | Route | Auth | Purpose |
 | :--- | :--- | :--- |
 | `POST /v1/reports` | Public (rate-limited) | Ingest validated redacted report, cluster by fingerprint, auto-escalate spikes |
-| `GET /v1/health` | Public | Service health, cluster counts, and active feed version |
+| `POST /api/v1/telemetry/ingest` | Public (rate-limited) | Ingest strictly opt-in, locally redacted system & scan diagnostics (`48 KB` cap, `opt_in` enforced) |
+| `GET /api/v1/telemetry/summary` | Operator Bearer | Aggregated telemetry analytics (`by_os`, `by_arch`, `by_wardr_version`, `top_failing_checks`, `top_pentest_exposures`, `top_exposed_risky_ports`, `top_supply_chain_matches`) |
+| `GET /v1/health` | Public | Service health, cluster counts, telemetry snapshot count, and active feed version |
 | `GET /feeds/defense-v1.json` | Public | Serve active signed Rapid-Defense Feed bundle |
 | `GET /feeds/defense-v1.json.sig` | Public | Serve detached 64-byte Ed25519 signature |
 | `GET /v1/clusters` | Operator Bearer | List clustered vulnerability/zero-day candidates sorted by escalation |

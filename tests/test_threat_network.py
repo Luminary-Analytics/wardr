@@ -70,9 +70,14 @@ class ThreatNetworkEndToEndTests(unittest.TestCase):
         self.assertEqual(st1, 202)
         self.assertEqual(json.loads(r1)["triage_status"], "open")
 
-        st2, r2 = self._req("POST", "/v1/reports", body=draft["payload"])
-        self.assertEqual(st2, 202)
-        self.assertEqual(json.loads(r2)["triage_status"], "escalated")
+        # Repeated report from same IP must NOT spoof escalation (distinct-reporter anti-spoofing).
+        st_dup, r_dup = self._req("POST", "/v1/reports", body=draft["payload"])
+        self.assertEqual(st_dup, 202)
+        self.assertEqual(json.loads(r_dup)["triage_status"], "open")
+
+        # Second distinct reporter reaches zero_day_threshold=2 and escalates the cluster.
+        r2 = self.server.store.ingest_report(draft["payload"], client_ip="203.0.113.55")
+        self.assertEqual(r2["triage_status"], "escalated")
 
         # 2. Unauthenticated cluster access is denied; operator token succeeds.
         self.assertEqual(self._req("GET", "/v1/clusters")[0], 401)
@@ -148,7 +153,7 @@ class ThreatNetworkEndToEndTests(unittest.TestCase):
         st_h, raw_h = self._req("GET", "/v1/health")
         self.assertEqual(st_h, 200)
         health = json.loads(raw_h)
-        self.assertEqual(health["reports"], 2)
+        self.assertEqual(health["reports"], 3)
         self.assertEqual(health["active_feed_version"], "2026.11.21-rapid-1")
 
 

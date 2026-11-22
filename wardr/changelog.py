@@ -1,0 +1,97 @@
+"""Versioned release notes and 'What's New?' modal state for Wardr."""
+
+from __future__ import annotations
+
+from . import updater
+
+
+RELEASES: tuple[dict, ...] = (
+    {
+        "version": "0.4.0",
+        "date": "2026-11-22",
+        "title": "Purple-Team Self-Pen-Test, Supply-Chain Scanner, Accounts & Hardened Telemetry",
+        "summary": "Major security upgrade adding authorized local self-pen-testing, compromised npm/framework exploit detection, a Dual-View Defense Matrix, Wardr Accounts with Google/Microsoft SSO, central opt-in diagnostics, and comprehensive security-audit hardening.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Authorized Local Self-Pen-Test Lab + One-Click Hardening",
+                "detail": "Safely simulates 6 real attacker techniques (exposed AI/database ports, infostealer secret harvest, startup backdoors, PATH hijacks, firewall boundaries, and live tamper canaries) with animated Fix & Harden verification.",
+            },
+            {
+                "tag": "New",
+                "title": "Compromised Package & Exploit Scanner (NPM, React2Shell, PHP2Shell)",
+                "detail": "Scans your local repos and installed packages for compromised npm packages, malicious postinstall hooks, React2Shell (CVE-2025-55182), PHP-CGI/PHP2Shell (CVE-2024-4577), Next.js middleware bypass, and Log4Shell.",
+            },
+            {
+                "tag": "New",
+                "title": "Everyday vs. Technical Defense Matrix",
+                "detail": "Toggle instantly between plain-English threat explanations and MITRE ATT&CK / telemetry proof across all 6 core protection domains.",
+            },
+            {
+                "tag": "New",
+                "title": "Wardr Accounts, Google/Microsoft SSO & Central Opt-In Diagnostics",
+                "detail": "Connect your Wardr account with OAuth 2.0 + PKCE SSO, explicit Privacy Policy & Terms consent, and strictly redacted opt-in system & scan diagnostics with live payload preview.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Security Audit Hardening, Queued OS Updates & GPU Performance",
+                "detail": "Completed full security-audit remediations (single-use auth nonces, IP-pinned TLS, Fleet rate-limiting, feed anti-rollback), queued OS updates for Green Protected status, and near-zero idle CPU/GPU usage.",
+            },
+        ],
+    },
+    {
+        "version": "0.3.1",
+        "date": "2026-11-21",
+        "title": "Wardr Fleet Control Plane, RBAC & Continuous Agent",
+        "summary": "Added the self-hostable Wardr Fleet control plane, role-based access control, agent enrollment, and fleet Web Console.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Self-Hosted Wardr Fleet & RBAC",
+                "detail": "Enroll servers and workstations into a centralized control plane with allowlisted remote actions and full audit history.",
+            },
+        ],
+    },
+    {
+        "version": "0.3.0",
+        "date": "2026-11-21",
+        "title": "3-Tier AI Protection & Visual Security Reports",
+        "summary": "Introduced Tier 1 Always-On Radar, Tier 2 Free Cloud AI Offload, Tier 3 Heavy Local AI, and Red/Amber/Green visual security reports.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Red / Amber / Green Shield & Interactive Visual Report",
+                "detail": "At-a-glance protection verdict with continuous sweeping radar, active threats panel, and printable/exportable RAG security reports.",
+            },
+            {
+                "tag": "New",
+                "title": "Light, Medium & Heavy Scan Profiles",
+                "detail": "Choose scan depth with transparent benefit and CPU/battery trade-off guidance before running.",
+            },
+        ],
+    },
+)
+
+
+def current_release() -> dict:
+    version = updater.current_version()
+    for rel in RELEASES:
+        if rel["version"] == version:
+            return dict(rel)
+    latest = dict(RELEASES[0])
+    if version and version != "development":
+        latest["version"] = version
+    return latest
+
+
+def whats_new_payload(last_seen_version: str | None) -> dict:
+    current = current_release()
+    version = current["version"]
+    should_show = last_seen_version != version
+    return {
+        "current_version": version,
+        "last_seen_version": last_seen_version,
+        "should_show": should_show,
+        "latest": current,
+        "history": [dict(r) for r in RELEASES],
+    }
