@@ -1,0 +1,80 @@
+name: Wardr live telemetry triage
+
+on:
+  schedule:
+    # Daily at 13:00 UTC (8:00 AM EST / 9:00 AM EDT)
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      force_issue:
+        description: Create or update the Release Triage GitHub Issue even when no urgent spikes exist
+        required: false
+        default: true
+        type: boolean
+      api_url:
+        description: Wardr Threat Network API URL
+        required: false
+        default: 'https://api.getwardr.com'
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    name: Collect live telemetry & prepare release triage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Install Wardr
+        run: python -m pip install --no-cache-dir .
+      - name: Fetch live telemetry & build triage digest
+        id: digest
+        env:
+          WARDR_ADMIN_TOKEN: ${{ secrets.WARDR_ADMIN_TOKEN }}
+          WARDR_API_URL: ${{ inputs.api_url || 'https://api.getwardr.com' }}
+        run: |
+          if [ -z "$WARDR_ADMIN_TOKEN" ]; then
+            echo "WARDR_ADMIN_TOKEN secret is not configured in GitHub repository secrets yet." >&2
+            echo "Run: gh secret set WARDR_ADMIN_TOKEN --repo Luminary-Analytics/wardr" >&2
+            exit 1
+          fi
+          mkdir -p triage-out
+          python -m wardr feedback-loop digest \
+            --server "$WARDR_API_URL" \
+            --format markdown \
+            --out-dir triage-out > /dev/null
+          cat triage-out/digest.md >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          data = json.loads(Path("triage-out/digest.json").read_text(encoding="utf-8"))
+          print(f"needs_attention={'true' if data.get('needs_attention') else 'false'}")
+          print(f"escalated_count={int(data.get('escalated_count') or 0)}")
+          print(f"recommended_version={data.get('recommended_version') or ''}")
+          print(f"total_snapshots={int(data.get('total_snapshots') or 0)}")
+          PY
+      - name: Create or update Release Triage Issue when actionable
+        if: steps.digest.outputs.needs_attention == 'true' || inputs.force_issue == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOMMENDED_VERSION: ${{ steps.digest.outputs.recommended_version }}
+          ESCALATED_COUNT: ${{ steps.digest.outputs.escalated_count }}
+        run: |
+          TITLE="[Telemetry Triage] Wardr Release Candidate Digest"
+          gh label create "telemetry-triage" --color "0E8A16" --description "Automated live telemetry and zero-day triage digest" --force || true
+          EXISTING=$(gh issue list --state open --label "telemetry-triage" --json number,title -q ".[] | select(.title == \"$TITLE\") | .number" | head -n 1)
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body-file triage-out/digest.md
+            echo "Updated Release Triage Issue #$EXISTING for candidate v$RECOMMENDED_VERSION (escalated: $ESCALATED_COUNT)."
+          else
+            gh issue create --title "$TITLE" --label "telemetry-triage" --body-file triage-out/digest.md
+            echo "Created Release Triage Issue for candidate v$RECOMMENDED_VERSION (escalated: $ESCALATED_COUNT)."
+          fi

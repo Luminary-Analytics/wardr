@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import (
-    assessment, checks, exposure, feeds, fim, fleet, fleet_agent, hunting, intel, inventory,
+    assessment, checks, exposure, feedback_loop, feeds, fim, fleet, fleet_agent, hunting, intel, inventory,
     local_ai, remediation, reporting, service, surface, threat_network, updater,
 )
 from .monitor import Monitor
@@ -108,6 +108,35 @@ def _parser() -> argparse.ArgumentParser:
     tn_cmd.add_argument("--port", type=lambda value: _integer(value, 0, 65535), default=8787)
     tn_cmd.add_argument("--signing-key", type=Path, help="Optional Ed25519 private key PEM file for /v1/feeds/publish.")
     tn_cmd.add_argument("--admin-token", default=None, help="Optional operator Bearer token (generated automatically if omitted).")
+
+    fl_cmd = commands.add_parser("feedback-loop", help="Pull live Threat Network telemetry & clusters and drive reviewed releases.")
+    fl_sub = fl_cmd.add_subparsers(dest="feedback_action", required=True)
+    fl_dig = fl_sub.add_parser("digest", help="Fetch live telemetry & zero-day clusters and build a release triage digest.")
+    fl_dig.add_argument("--server", default=feedback_loop.DEFAULT_API_URL, help="Wardr Threat Network API URL.")
+    fl_dig.add_argument("--token-env", default="WARDR_ADMIN_TOKEN", help="Environment variable holding the admin Bearer token.")
+    fl_dig.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    fl_dig.add_argument("--out-dir", type=Path, default=None, help="Optional directory to write digest.md, digest.json, and defense-v1.draft.json.")
+    fl_dig.add_argument("--fail-on-escalated", action="store_true", help="Exit with status 2 if escalated zero-day clusters exist.")
+
+    fl_prep = fl_sub.add_parser("prepare-release", help="Bump pyproject.toml, changelog.py, and index.html for the next release.")
+    fl_prep.add_argument("--repo", type=Path, default=Path("."), help="Wardr repository root (default current directory).")
+    fl_prep.add_argument("--version", default=None, help="Explicit X.Y.Z target version (overrides --bump).")
+    fl_prep.add_argument("--bump", choices=("patch", "minor", "major"), default="patch")
+    fl_prep.add_argument("--title", default="", help="Custom release title for What's New.")
+    fl_prep.add_argument("--summary", default="", help="Custom release summary for What's New.")
+    fl_prep.add_argument("--from-live", action="store_true", help="Pull live telemetry from --server to pre-populate changelog highlights.")
+    fl_prep.add_argument("--server", default=feedback_loop.DEFAULT_API_URL, help="Wardr Threat Network API URL (for --from-live).")
+    fl_prep.add_argument("--token-env", default="WARDR_ADMIN_TOKEN", help="Environment variable holding the admin Bearer token.")
+    fl_prep.add_argument("--dry-run", action="store_true", help="Validate and preview the bump without writing files.")
+
+    fl_pub = fl_sub.add_parser("publish-release", help="Run tests, verify git state, push main, and invoke packaging/release.py.")
+    fl_pub.add_argument("--repo", type=Path, default=Path("."), help="Wardr repository root (default current directory).")
+    fl_pub.add_argument("--version", required=True, help="Release version X.Y.Z matching pyproject.toml.")
+    fl_pub.add_argument("--site", type=Path, default=Path("../Wardr-Site"), help="Local Wardr-Site checkout path.")
+    fl_pub.add_argument("--signing-repo", type=Path, default=Path("../resonant-client"), help="Local signing repository checkout path.")
+    fl_pub.add_argument("--signing-key", type=Path, default=Path("~/.config/wardr-release/community-ed25519.pem"),
+                        help="Local Ed25519 private signing key PEM path.")
+    fl_pub.add_argument("--plan", action="store_true", help="Preview the release pipeline without pushing or publishing.")
 
     fix_cmd = commands.add_parser("fix", help="Preview, apply, or roll back allowlisted local security remediations.")
     fix_action = fix_cmd.add_mutually_exclusive_group(required=True)
@@ -344,6 +373,65 @@ def main(argv: list[str] | None = None) -> int:
                     srv.serve_forever()
                 except KeyboardInterrupt:
                     pass
+        elif args.command == "feedback-loop":
+            if args.feedback_action == "digest":
+                token = os.environ.get(args.token_env, "")
+                signals = feedback_loop.fetch_live_signals(args.server, admin_token=token)
+                digest = feedback_loop.build_triage_digest(signals)
+                if args.out_dir:
+                    feedback_loop.write_digest_artifacts(digest, args.out_dir)
+                if args.format == "json":
+                    print(json_report({k: v for k, v in digest.items() if k != "markdown"}), end="")
+                else:
+                    print(digest["markdown"], end="")
+                if args.fail_on_escalated and digest["escalated_count"] > 0:
+                    return 2
+            elif args.feedback_action == "prepare-release":
+                highlights = None
+                if args.from_live:
+                    token = os.environ.get(args.token_env, "")
+                    signals = feedback_loop.fetch_live_signals(args.server, admin_token=token)
+                    digest = feedback_loop.build_triage_digest(signals)
+                    highlights = digest["recommended_highlights"]
+                result = feedback_loop.prepare_release_bump(
+                    args.repo,
+                    target_version=args.version,
+                    bump=args.bump,
+                    title=args.title,
+                    summary=args.summary,
+                    highlights=highlights,
+                    dry_run=args.dry_run,
+                )
+                print(json_report(result), end="")
+            elif args.feedback_action == "publish-release":
+                repo = args.repo.expanduser().resolve()
+                release_script = repo / "packaging" / "release.py"
+                if not release_script.is_file():
+                    raise feedback_loop.FeedbackLoopError(f"Could not find release runner at {release_script}.")
+                # 1. Run full unit test suite before touching git/release
+                test_run = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"], cwd=repo)
+                if test_run.returncode != 0:
+                    raise feedback_loop.FeedbackLoopError("Unit tests failed. Fix failing tests before publishing.")
+                if not args.plan:
+                    dirty = subprocess.check_output(["git", "-C", str(repo), "status", "--porcelain"], text=True).strip()
+                    if dirty:
+                        raise feedback_loop.FeedbackLoopError(
+                            "Repository has uncommitted changes. Review and commit your release changes first."
+                        )
+                    push_run = subprocess.run(["git", "-C", str(repo), "push", "origin", "main"])
+                    if push_run.returncode != 0:
+                        raise feedback_loop.FeedbackLoopError("Failed to push main to origin before release.")
+                cmd = [
+                    sys.executable, str(release_script),
+                    "--version", args.version,
+                    "--site", str(args.site.expanduser().resolve()),
+                    "--signing-repo", str(args.signing_repo.expanduser().resolve()),
+                    "--signing-key", str(args.signing_key.expanduser().resolve()),
+                ]
+                if args.plan:
+                    cmd.append("--plan")
+                rel_run = subprocess.run(cmd, cwd=repo)
+                return rel_run.returncode
         elif args.command == "fix":
             if args.preview:
                 print(json_report(remediation.preview_fix(args.preview)), end="")
@@ -391,8 +479,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 0
     except (
-        OSError, ValueError, assessment.AssessmentError, feeds.FeedError, fleet_agent.FleetAgentError,
-        intel.AdvisoryError, local_ai.LocalAIError, ReleaseError, reporting.ReportingError, updater.UpdaterError,
+        OSError, ValueError, assessment.AssessmentError, feedback_loop.FeedbackLoopError, feeds.FeedError,
+        fleet_agent.FleetAgentError, intel.AdvisoryError, local_ai.LocalAIError, ReleaseError,
+        reporting.ReportingError, updater.UpdaterError,
     ) as exc:
         print(f"Wardr: {exc}", file=sys.stderr)
         return 1

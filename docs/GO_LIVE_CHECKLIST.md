@@ -55,7 +55,21 @@ Choose either **Render** (same platform as `getwardr.com`) using `deploy/threat-
 - **Microsoft SSO:** Public PKCE (`S256`) Entra client ID (`d88b005f-fc08-40cd-8037-873321f31433`) is built into `wardr/account.py` — works out of the box with zero secrets.
 - **Google SSO:** For public desktop builds, either configure a hosted OAuth broker (`WARDR_AUTH_BROKER_URL`) on `api.getwardr.com` (recommended so no client secret ships in desktop binaries) or supply `WARDR_GOOGLE_CLIENT_ID` / `WARDR_GOOGLE_CLIENT_SECRET` via environment / `sso-config.json`.
 
-## Ongoing Update Loop (`v0.4.0` → `v0.4.1+`)
-1. Pull `GET /api/v1/telemetry/summary` and `GET /v1/clusters` regularly to spot top failing checks, risky ports, and compromised package trends.
-2. For urgent zero-day rules or emerging CVEs, publish a signed Rapid-Defense Feed immediately via `POST /v1/feeds/publish` (zero app reinstall needed).
-3. For new checks, auto-fixes, or UI improvements, bump `pyproject.toml` + `wardr/changelog.py`, push `main`, and run `packaging/release.py` — customers automatically receive the signed update via **Updates → Check for updates** and see your release highlights in **"What's New?"**.
+## Automated Feedback → Release Loop (`v0.4.0` → `v0.4.1+`)
+1. **One-time secret setup for automated daily GitHub triage:**
+   Copy `WARDR_ADMIN_TOKEN` from Render (`wardr-threat-network` → **Environment**) into GitHub Actions Secrets:
+   ```bash
+   gh secret set WARDR_ADMIN_TOKEN --repo Luminary-Analytics/wardr
+   ```
+   `.github/workflows/telemetry-triage.yml` then runs daily at 13:00 UTC (or on demand via `workflow_dispatch`), fetches live telemetry + zero-day clusters from `https://api.getwardr.com`, and automatically creates/updates the pinned **`[Telemetry Triage] Wardr Release Candidate Digest`** GitHub Issue with top failing checks, pen-test exposures, risky ports, compromised packages, and a validated `defense-v1.draft.json` feed bundle.
+2. **Urgent zero-day rapid defense (no app reinstall needed):**
+   Review `defense-v1.draft.json` and publish an Ed25519-signed Rapid-Defense Feed via `wardr feed --sign` / `POST /v1/feeds/publish`.
+3. **Prepare & ship the next reviewed signed release (`v0.4.1+`):**
+   ```bash
+   # Pull live telemetry into pyproject.toml + changelog.py ("What's New?")
+   WARDR_ADMIN_TOKEN=... wardr feedback-loop prepare-release --bump patch --from-live
+
+   # Review changes / add targeted check or hardening fixes, commit, then publish:
+   wardr feedback-loop publish-release --version 0.4.1
+   ```
+   Every existing customer receives the Ed25519-signed update via **Updates → Check for updates** and sees the new release highlights in **"What's New?"**.
