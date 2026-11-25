@@ -7,6 +7,29 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.2",
+        "date": "2026-11-25",
+        "title": "Seamless OAuth Auto-Focus & True One-Click Scan and Fix-to-Green",
+        "summary": "Completing Google or Microsoft sign-in now automatically unlocks and raises the native Wardr desktop app, Run Scan starts in a single click with no scrolling, and a prominent Fix-to-Green CTA appears right on the Overview hero.",
+        "highlights": [
+            {
+                "tag": "Improved",
+                "title": "Seamless OAuth Auto-Unlock & Window Focus",
+                "detail": "Finishing Google or Microsoft sign-in in your browser now automatically unlocks Wardr in under a second and brings the native desktop app right back to the front—no localhost links or extra clicks.",
+            },
+            {
+                "tag": "Improved",
+                "title": "True One-Click Run Scan (Zero Scrolling)",
+                "detail": "Clicking Run Scan now starts the recommended Medium scan immediately in one click, with a compact Depth selector right next to it if you want Light or Heavy scans.",
+            },
+            {
+                "tag": "New",
+                "title": "One-Click Fix-to-Green Button on Overview Hero",
+                "detail": "Whenever Wardr finds open issues, a glowing green Fix & Protect / Open Settings CTA appears right at the top of the Overview banner so reaching 100% Green is always one click away.",
+            },
+        ],
+    },
+    {
         "version": "0.4.1",
         "date": "2026-11-25",
         "title": "Native Desktop Apps, System Tray & Stateless Google Sign-In",

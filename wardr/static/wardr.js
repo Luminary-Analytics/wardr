@@ -37,6 +37,7 @@ const state = {
   pendingModel: false,
   authMode: "register",
   pendingAuth: false,
+  awaitingSso: false,
   pendingTelemetrySync: false,
   legalData: null,
   legalTab: "privacy",
@@ -235,9 +236,13 @@ function renderControls() {
   const scanDisabled = !state.connected || scanning || fixing;
   element("checklist-fix-all").disabled = scanDisabled;
   element("workflow-fix-all").disabled = scanDisabled;
+  element("hero-fix-button").disabled = scanDisabled;
+  element("hero-scan-depth").disabled = scanDisabled;
   const activeProfile = scan?.profile_label || "scan";
   const ragLevel = state.data?.posture?.level || "pending";
   const urgentScan = ragLevel === "red" || ragLevel === "amber";
+  const depthLabels = { light: "Light", medium: "Medium", heavy: "Heavy" };
+  setText("hero-scan-depth-label", "Depth: " + (depthLabels[state.selectedScanProfile] || "Medium") + " ▾");
   element("scan-button").disabled = scanDisabled;
   element("scan-button").dataset.running = String(scanning);
   setText("scan-label", scanning ? "Running " + activeProfile.toLowerCase() + "…" : "Run scan");
@@ -644,6 +649,38 @@ function showPosture(data) {
     setText("protection-verdict", scan.state === "running"
       ? "Verifying firewall, disk encryption, system patches, and permissions…"
       : "Run a scan to verify everything Wardr can secure.");
+  }
+
+  // One-click Fix-to-Green CTA directly on the Overview hero card
+  const heroFixBtn = element("hero-fix-button");
+  const allChecks = sortedChecks(scan?.checks || []);
+  const openFailing = allChecks.filter((c) => c.status === "fail" && !isHandledCheck(c));
+  const autoFixable = openFailing.filter((c) => c.can_fix === true || c.action_guide?.can_script_fix === true);
+  const firstSettings = openFailing.find((c) => c.action_guide?.can_open_settings);
+  if (!ready || openFailing.length === 0) {
+    heroFixBtn.hidden = true;
+    heroFixBtn.dataset.mode = "";
+    heroFixBtn.dataset.settingsId = "";
+  } else if (autoFixable.length > 0) {
+    heroFixBtn.hidden = false;
+    heroFixBtn.dataset.mode = "fix";
+    heroFixBtn.dataset.settingsId = "";
+    setText(
+      "hero-fix-label",
+      autoFixable.length === openFailing.length
+        ? (autoFixable.length === 1 ? "Fix 1 issue → Green" : "Fix All (" + numberFormat.format(autoFixable.length) + ") → Green")
+        : "Fix & Protect (" + numberFormat.format(autoFixable.length) + ")",
+    );
+  } else if (firstSettings) {
+    heroFixBtn.hidden = false;
+    heroFixBtn.dataset.mode = "settings";
+    heroFixBtn.dataset.settingsId = firstSettings.id;
+    setText("hero-fix-label", "Fix: " + (firstSettings.action_guide.settings_label || "Open Settings") + " ↗");
+  } else {
+    heroFixBtn.hidden = false;
+    heroFixBtn.dataset.mode = "review";
+    heroFixBtn.dataset.settingsId = "";
+    setText("hero-fix-label", "Review " + plural(openFailing.length, "issue") + " →");
   }
 
   // Last scan depth summary on Hero
@@ -1515,11 +1552,13 @@ async function poll() {
   if (state.view === "defense" && state.connected) await refreshDefense(pentestActive);
   if (element("updates-dialog").open && updateWorking()) await refreshUpdates();
   if (generation !== pollGeneration || state.needsLaunch) return;
-  const busy = state.data?.scan.state === "running" || state.data?.intel.state === "running"
+  const busy = state.awaitingSso
+    || state.data?.scan.state === "running" || state.data?.intel.state === "running"
     || state.data?.fix_batch?.state === "running"
     || pentestActive
     || state.defense?.exposure.running || (element("updates-dialog").open && updateWorking());
-  pollTimer = window.setTimeout(poll, document.hidden ? 25000 : busy ? 450 : 8000);
+  const delay = state.awaitingSso ? 600 : document.hidden ? 25000 : busy ? 450 : 8000;
+  pollTimer = window.setTimeout(poll, delay);
 }
 
 function errorText(error, fallback) {
@@ -1859,7 +1898,7 @@ function promptScriptFixes(checksToFix) {
 
 function triggerFixAll() {
   const checks = sortedChecks(state.data?.scan?.checks || []);
-  const repairable = checks.filter((c) => c.status === "fail" && (c.can_fix === true || c.action_guide?.can_script_fix === true));
+  const repairable = checks.filter((c) => c.status === "fail" && !isHandledCheck(c) && (c.can_fix === true || c.action_guide?.can_script_fix === true));
   if (!repairable.length) return;
   promptScriptFixes(repairable);
 }
@@ -3397,6 +3436,10 @@ function renderAccount(acct) {
   }
 
   const gate = element("auth-gate-dialog");
+  if (signedIn && state.awaitingSso) {
+    state.awaitingSso = false;
+    setText("announcer", "Signed in to Wardr.");
+  }
   if (acct.auth_required && !gate.open && !element("legal-dialog").open) {
     setAuthMode(state.authMode);
     gate.showModal();
@@ -3464,8 +3507,14 @@ async function triggerSso(provider) {
       accepted_legal: state.authMode === "login" ? true : element("auth-accept-legal").checked,
     });
     if (result.authorize_url) {
+      state.awaitingSso = true;
       window.open(result.authorize_url, "_blank", "noopener,noreferrer");
-      showAuthError("Finish signing in with " + capitalized(provider) + " in your browser — Wardr will unlock automatically.");
+      showAuthError(
+        window.__WARDR_DESKTOP__
+          ? "Finish signing in with " + capitalized(provider) + " in your browser — Wardr will unlock and pop back automatically."
+          : "Finish signing in with " + capitalized(provider) + " in your browser — Wardr will unlock automatically.",
+      );
+      poll();
     }
   } catch (error) {
     showAuthError(errorText(error, "Could not start sign-in."));
@@ -3626,8 +3675,32 @@ for (const id of ["software-sbom", "software-osv"]) element(id).addEventListener
 element("local-model-check").addEventListener("click", () => runModelAction(false));
 element("local-model-review").addEventListener("click", () => runModelAction(true));
 
-element("scan-button").addEventListener("click", openScanDialog);
-element("hero-scan-button").addEventListener("click", openScanDialog);
+element("scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
+element("hero-scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
+element("hero-scan-depth").addEventListener("click", openScanDialog);
+element("hero-fix-button").addEventListener("click", () => {
+  const btn = element("hero-fix-button");
+  if (btn.dataset.mode === "fix") {
+    triggerFixAll();
+  } else if (btn.dataset.mode === "settings" && btn.dataset.settingsId) {
+    openCheckSettings(btn.dataset.settingsId);
+    state.overviewFilter = "attention";
+    if (state.data) render(state.data);
+    element("priority-list")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } else {
+    state.overviewFilter = "attention";
+    if (state.data) render(state.data);
+    element("priority-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+window.__wardrOnFocus = () => {
+  if (state.connected) refresh();
+};
+window.addEventListener("focus", () => {
+  if (state.connected && (state.awaitingSso || element("auth-gate-dialog").open)) {
+    refresh();
+  }
+});
 element("cancel-scan-dialog").addEventListener("click", () => element("scan-dialog").close());
 element("confirm-scan-dialog").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("workflow-fix-all").addEventListener("click", triggerFixAll);

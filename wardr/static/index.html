@@ -108,7 +108,9 @@
                   <p class="coverage-depth-note" id="scan-depth-summary" hidden></p>
                 </div>
                 <div class="posture-actions">
+                  <button class="button hero-cta hero-cta-fix" type="button" id="hero-fix-button" hidden><span class="icon icon-defend" aria-hidden="true"></span><span id="hero-fix-label">Fix &amp; Protect</span></button>
                   <button class="button hero-cta hero-cta-scan" type="button" id="hero-scan-button" disabled><span class="icon icon-scan" aria-hidden="true"></span><span id="hero-scan-label">Run scan now</span></button>
+                  <button class="button hero-cta hero-cta-depth" type="button" id="hero-scan-depth" aria-haspopup="dialog" title="Choose Light, Medium, or Heavy scan depth" disabled><span id="hero-scan-depth-label">Depth: Medium ▾</span></button>
                   <button class="button hero-cta hero-cta-report" type="button" data-visual-report="true" id="hero-report-button" disabled><span class="icon icon-file" aria-hidden="true"></span><span id="hero-report-label">Visual report</span></button>
                 </div>
                 <ul class="severity-summary" aria-label="Open findings by severity">
@@ -923,7 +925,7 @@
   </dialog>
   <dialog class="dialog whats-new-dialog" id="whats-new-dialog" aria-labelledby="whats-new-title">
     <div class="whats-new-head">
-      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.1</span>
+      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.2</span>
       <h2 id="whats-new-title">What’s New in Wardr</h2>
       <p id="whats-new-summary">Security upgrades, new protections, and improvements in this release.</p>
     </div>

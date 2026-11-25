@@ -77,6 +77,19 @@ class DesktopShellIntegrationTests(unittest.TestCase):
         self.assertIn("NSAllowsLocalNetworking", build_sh)
         self.assertIn("NSHighResolutionCapable", build_sh)
 
+    def test_overview_hero_has_one_click_fix_and_depth_controls(self):
+        html = (REPO_ROOT / "wardr/static/index.html").read_text(encoding="utf-8")
+        js = (REPO_ROOT / "wardr/static/wardr.js").read_text(encoding="utf-8")
+        self.assertIn('id="hero-fix-button"', html)
+        self.assertIn('id="hero-scan-depth"', html)
+        self.assertIn('element("hero-scan-button").addEventListener("click", () => startScan(state.selectedScanProfile))', js)
+        self.assertIn("window.__wardrOnFocus", js)
+
+    def test_oauth_callback_signals_desktop_focus_without_browser_dashboard_link(self):
+        server_src = (REPO_ROOT / "wardr/server.py").read_text(encoding="utf-8")
+        self.assertIn('print("WARDR_DESKTOP_EVENT focus", flush=True)', server_src)
+        self.assertIn("launch_url=None if desktop_shell else self.server.issue_launch_url()", server_src)
+
 
 if __name__ == "__main__":
     unittest.main()

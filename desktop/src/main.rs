@@ -128,7 +128,18 @@ fn load_icons() -> (Option<WindowIcon>, Option<TrayIconImage>) {
 fn show_and_focus(window: &Window) {
     window.set_visible(true);
     window.set_minimized(false);
-    window.set_focus();
+    #[cfg(target_os = "windows")]
+    {
+        // Briefly toggle top-most on Windows so returning from browser OAuth reliably
+        // raises Wardr above the browser window without staying pinned on top.
+        window.set_always_on_top(true);
+        window.set_focus();
+        window.set_always_on_top(false);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        window.set_focus();
+    }
 }
 
 fn is_allowed_navigation(url: &str, trusted_origin: &Arc<Mutex<Option<String>>>) -> bool {
@@ -490,6 +501,10 @@ fn main() {
                         *guard = Some(origin);
                     }
                     let _ = webview.load_url(&launch_url);
+                }
+                BackendEvent::FocusWindow => {
+                    show_and_focus(&window);
+                    let _ = webview.evaluate_script("if (window.__wardrOnFocus) window.__wardrOnFocus();");
                 }
                 BackendEvent::Restarting => {
                     if let Ok(mut guard) = trusted_origin.lock() {

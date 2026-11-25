@@ -514,6 +514,28 @@ h1, h2, h3 { color: var(--ink); }
   background-color: rgba(255, 255, 255, .22);
   border-color: rgba(255, 255, 255, .48);
 }
+.hero-cta-fix {
+  min-height: 48px;
+  padding: 11px 22px;
+  font-size: .96rem;
+  font-weight: 820;
+  letter-spacing: -.01em;
+  color: #052e16;
+  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+  border: 2px solid #bbf7d0;
+  box-shadow: 0 8px 24px rgba(22, 163, 74, .42);
+}
+.hero-cta-fix:not(:disabled):hover {
+  background: linear-gradient(135deg, #86efac 0%, #4ade80 100%);
+  border-color: #ffffff;
+  color: #052e16;
+  box-shadow: 0 10px 28px rgba(34, 197, 94, .5);
+}
+.hero-cta-depth {
+  padding: 10px 14px;
+  font-size: .84rem;
+  font-weight: 640;
+}
 .hero-cta-scan[data-running="true"] .icon-scan { animation: scan 1.4s ease-in-out infinite; }
 
 /* Non-interactive pulsing halo behind primary hero CTA so hover never fights keyframes */
@@ -1411,8 +1433,38 @@ h1, h2, h3 { color: var(--ink); }
 .ai-triage-meta { font-size: .76rem; color: var(--muted); }
 
 /* Scan Depth Chooser Dialog */
-.scan-dialog { width: min(740px, calc(100% - 28px)); max-width: min(740px, calc(100% - 28px)); }
-.scan-options { display: grid; gap: 11px; margin-top: 16px; }
+.scan-dialog {
+  width: min(860px, calc(100% - 28px));
+  max-width: min(860px, calc(100% - 28px));
+  max-height: min(88vh, 720px);
+  overflow: hidden;
+}
+.scan-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.scan-dialog > .dialog-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.scan-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  padding-right: 2px;
+}
+.scan-dialog .dialog-actions {
+  flex: none;
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .scan-options { grid-template-columns: 1fr; }
+}
 .scan-option {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);

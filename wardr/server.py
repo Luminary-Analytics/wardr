@@ -227,12 +227,20 @@ class DashboardRequest(BaseHTTPRequestHandler):
             who = acct.get("name") or acct.get("email") or "your account"
             email = acct.get("email") or ""
             provider = str(acct.get("provider") or "SSO").capitalize()
+            desktop_shell = os.environ.get("WARDR_DESKTOP_SHELL") == "1"
+            if desktop_shell:
+                # Signal the native desktop shell to pop Wardr to the front and refresh immediately.
+                print("WARDR_DESKTOP_EVENT focus", flush=True)
             body = self._oauth_callback_page(
                 ok=True,
                 title=f"Welcome, {who}!",
                 subtitle=f"Verified with {provider} ({email})" if email else f"Verified with {provider}",
-                detail="Authentication succeeded. Return to Wardr (it unlocks automatically), or click below to open your dashboard.",
-                launch_url=self.server.issue_launch_url(),
+                detail=(
+                    "You're signed in! The Wardr desktop app has unlocked automatically — you can close this browser tab."
+                    if desktop_shell
+                    else "Authentication succeeded. Return to Wardr (it unlocks automatically), or click below to open your dashboard."
+                ),
+                launch_url=None if desktop_shell else self.server.issue_launch_url(),
             )
             self._respond(HTTPStatus.OK, body, "text/html; charset=utf-8")
         except account.AccountError as exc:

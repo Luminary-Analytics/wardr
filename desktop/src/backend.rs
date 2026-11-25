@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 pub const DESKTOP_RESTART_EXIT_CODE: i32 = 75;
 const LAUNCH_PREFIX: &str = "Wardr is running at ";
+const DESKTOP_EVENT_FOCUS: &str = "WARDR_DESKTOP_EVENT focus";
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -26,6 +27,7 @@ pub struct BackendConfig {
 pub enum BackendEvent {
     Status { headline: String, detail: String },
     Ready { origin: String, launch_url: String },
+    FocusWindow,
     Restarting,
     Failed(String),
 }
@@ -379,7 +381,11 @@ fn supervisor_loop<F>(
                     if let Some((origin, launch_url)) = parse_launch_line(&line) {
                         announced = true;
                         emit(BackendEvent::Ready { origin, launch_url });
+                        continue;
                     }
+                }
+                if line.trim() == DESKTOP_EVENT_FOCUS {
+                    emit(BackendEvent::FocusWindow);
                 }
             }
         }
