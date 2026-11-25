@@ -7,6 +7,24 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.7",
+        "date": "2026-11-25",
+        "title": "Dashboard Connection Hotfix & Accepted-Risk Checklist Consistency",
+        "summary": "Fixed a critical dashboard JavaScript ReferenceError in showScan() that caused the UI to falsely report 'Disconnected / Wardr lost its local connection' immediately after a scan completed, and aligned accepted-risk counts across Overview and Fix All.",
+        "highlights": [
+            {
+                "tag": "Fixed",
+                "title": "Eliminated False 'Disconnected' Banner After Scan Completion",
+                "detail": "Defined the missing `repairable` array in `showScan()` and isolated UI render exceptions from fetch errors so the live radar and local connection indicator stay connected cleanly across Windows, macOS, and Linux.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Consistent Accepted-Risk & Fix-All Counts",
+                "detail": "Acknowledged failing controls now appear in Fix All with clear Undo/Restore controls and accurate Risk Accepted messaging on the Overview hero.",
+            },
+        ],
+    },
+    {
         "version": "0.4.6",
         "date": "2026-11-25",
         "title": "Seamless Windows In-App Update Restart & Verified Green Shield Hardening",

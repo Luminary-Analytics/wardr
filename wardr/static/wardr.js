@@ -350,7 +350,7 @@ function isAcceptedRiskCheck(check) {
 
 function openActionableChecks(scan) {
   return sortedChecks(scan?.checks || []).filter(
-    (c) => (c.status === "fail" || c.status === "unknown") && !isHandledCheck(c) && !isAcceptedRiskCheck(c),
+    (c) => (c.status === "fail" || c.status === "unknown") && !isHandledCheck(c),
   );
 }
 
@@ -695,6 +695,8 @@ function showPosture(data) {
       setText("protection-verdict", plural(posture.failed, "item") + " still need attention" + fixText + " to maximize protection.");
     } else if (posture.unverified > 0) {
       setText("protection-verdict", plural(posture.unverified, "check") + " could not be verified automatically.");
+    } else if ((posture.accepted_risks || 0) > 0) {
+      setText("protection-verdict", plural(posture.accepted_risks, "failing check") + " acknowledged as accepted risk — fix and re-scan to reach Green.");
     } else {
       setText("protection-verdict", "Continuous scanning is paused — restart Wardr to resume real-time monitoring.");
     }
@@ -834,7 +836,7 @@ function showScan(scan) {
   const unknown = checks.filter((check) => check.status === "unknown" && !isHandledCheck(check));
   const passed = checks.filter((check) => check.status === "pass");
   const addressed = [...handled, ...passed];
-  const fixable = attention.filter((check) => check.can_fix === true);
+  const repairable = attention.filter((check) => check.can_fix === true || check.action_guide?.can_script_fix === true);
   const ready = Boolean(scan.updated_at);
   const scanDate = humanDate(scan.updated_at);
   const waiting = scan.state === "running" ? "Device scan is running…" : "Run a scan to verify this device.";
@@ -1137,7 +1139,7 @@ function buildWorkflowStepRow(step, mode) {
 
 function buildTodoActionButtons(check) {
   const wrap = make("div", "todo-item-actions");
-  if (isHandledCheck(check)) {
+  if (isHandledCheck(check) || isAcceptedRiskCheck(check)) {
     const undoBtn = make("button", "button button-secondary button-small button-undo-disp", "Undo / Restore");
     undoBtn.type = "button";
     undoBtn.dataset.disposition = check.id;
@@ -1163,7 +1165,7 @@ function buildTodoActionButtons(check) {
     scriptBtn.addEventListener("click", () => promptScriptFixes([check]));
     wrap.append(scriptBtn);
   }
-  if (check.status === "fail") {
+  if (check.status === "fail" && check.can_fix !== true) {
     const dispMeta = dispositionMeta(check);
     const ackBtn = make("button", "button button-ack button-small", dispMeta.actionLabel);
     ackBtn.type = "button";
@@ -1576,12 +1578,16 @@ async function refresh() {
       .then((data) => {
         if (requestedToken !== token) return;
         const previous = state.data?.scan;
-        renderStatus(data);
+        try {
+          renderStatus(data);
+        } catch (renderErr) {
+          console.error("Wardr UI render error:", renderErr);
+          return;
+        }
         if (previous?.state === "running" && data.scan.state !== "running") {
           setText("announcer", data.scan.error || "Scan complete.");
         }
-      })
-      .catch((error) => {
+      }, (error) => {
         if (requestedToken === token) connectionError(error);
       })
       .finally(() => { if (refreshRequest === pending) refreshRequest = null; });

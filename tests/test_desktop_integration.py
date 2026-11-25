@@ -141,6 +141,15 @@ class DesktopShellIntegrationTests(unittest.TestCase):
             self.assertEqual(recheck["level"], "red")
             self.assertEqual(recheck["failed"], 1)
 
+    def test_show_scan_defines_repairable_and_refresh_isolates_render_errors(self):
+        js = (REPO_ROOT / "wardr/static/wardr.js").read_text(encoding="utf-8")
+        start = js.index("function showScan(scan)")
+        end = js.index("\nfunction coverageRow(", start)
+        show_scan_body = js[start:end]
+        self.assertIn("const repairable =", show_scan_body)
+        self.assertIn("repairable.length", show_scan_body)
+        self.assertIn('console.error("Wardr UI render error:", renderErr)', js)
+
     def test_desktop_shell_update_restart_exits_cleanly_with_open_stdin_pipe(self):
         # Reproduces the Windows Py_FinalizeEx _enter_buffered_busy crash when
         # watch_desktop_parent held sys.stdin's BufferedReader lock during restart.
