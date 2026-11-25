@@ -57,7 +57,8 @@ class DesktopShellIntegrationTests(unittest.TestCase):
 
             module.write_desktop(data_home, interp)
             entry = (data_home / "applications" / f"{module.DESKTOP_ID}.desktop").read_text(encoding="utf-8")
-            self.assertIn(f'Exec="{desktop_bin}"\n', entry)
+            self.assertIn('wardr-desktop"\n', entry)
+            self.assertNotIn("-m wardr", entry)
             self.assertIn("Terminal=false\n", entry)
             self.assertIn("StartupWMClass=wardr-desktop\n", entry)
 

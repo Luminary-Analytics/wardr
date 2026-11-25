@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
           python packaging/linux/build.py --payload native-payload --arch "$WARDR_ARCH" --output native-dist
           export XDG_DATA_HOME="$RUNNER_TEMP/wardr-data"
           sh "native-dist/wardr-$WARDR_VERSION-linux-$WARDR_ARCH.run" --no-desktop

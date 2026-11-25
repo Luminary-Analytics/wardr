@@ -25,7 +25,7 @@ the app for future signed releases.
 
 ## Build and test
 
-Install the Linux WebView build libraries (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`) and Rust (`cargo`). Stage the payload on Linux using `packaging/build_payload.py`. This fetches the canonical signed wheel from `getwardr.com` and downloads the matching Python runtime and dependency wheels. Pass the staged directory to the Linux builder, which compiles and bundles the native `wardr-desktop` application (`Terminal=false`).
+Install the Linux WebView build libraries (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `libxdo-dev`) and Rust (`cargo`). Stage the payload on Linux using `packaging/build_payload.py`. This fetches the canonical signed wheel from `getwardr.com` and downloads the matching Python runtime and dependency wheels. Pass the staged directory to the Linux builder, which compiles and bundles the native `wardr-desktop` application (`Terminal=false`).
 
 ```sh
 python packaging/build_payload.py --version 0.4.0 --output /tmp/wardr-payload
