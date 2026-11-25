@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub const DESKTOP_RESTART_EXIT_CODE: i32 = 75;
 const LAUNCH_PREFIX: &str = "Wardr is running at ";
 const DESKTOP_EVENT_FOCUS: &str = "WARDR_DESKTOP_EVENT focus";
+const DESKTOP_EVENT_RESTART: &str = "WARDR_DESKTOP_EVENT restart";
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -374,6 +375,7 @@ fn supervisor_loop<F>(
         });
 
         let mut announced = false;
+        let mut restart_requested = false;
         if let Some(pipe) = stdout {
             let reader = BufReader::new(pipe);
             for line in reader.lines().map_while(Result::ok) {
@@ -386,6 +388,17 @@ fn supervisor_loop<F>(
                 }
                 if line.trim() == DESKTOP_EVENT_FOCUS {
                     emit(BackendEvent::FocusWindow);
+                    continue;
+                }
+                if line.trim() == DESKTOP_EVENT_RESTART {
+                    restart_requested = true;
+                    // Drop stdin immediately so the child's parent-watcher thread
+                    // sees EOF and exits cleanly before interpreter shutdown.
+                    if let Ok(mut guard) = active.lock() {
+                        if let Some(ref mut running) = *guard {
+                            drop(running._stdin.take());
+                        }
+                    }
                 }
             }
         }
@@ -404,12 +417,13 @@ fn supervisor_loop<F>(
             return;
         }
 
+        if restart_requested || status.and_then(|s| s.code()) == Some(DESKTOP_RESTART_EXIT_CODE) {
+            emit(BackendEvent::Restarting);
+            thread::sleep(Duration::from_millis(150));
+            continue;
+        }
+
         match status.and_then(|s| s.code()) {
-            Some(DESKTOP_RESTART_EXIT_CODE) => {
-                emit(BackendEvent::Restarting);
-                thread::sleep(Duration::from_millis(150));
-                continue;
-            }
             Some(0) => {
                 // Clean exit when not restarting (e.g., external termination).
                 return;

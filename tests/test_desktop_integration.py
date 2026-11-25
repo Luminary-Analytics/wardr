@@ -1,12 +1,16 @@
 """Tests for native desktop shell integration across Windows, macOS, and Linux packaging."""
 
 from importlib.util import module_from_spec, spec_from_file_location
+import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import types
 import unittest
 from unittest.mock import patch
+from urllib.request import Request, urlopen
 
 from wardr import cli
 from wardr.server import RESTART_DASHBOARD
@@ -136,6 +140,98 @@ class DesktopShellIntegrationTests(unittest.TestCase):
             recheck = assess_posture(state.enriched_scan_snapshot())
             self.assertEqual(recheck["level"], "red")
             self.assertEqual(recheck["failed"], 1)
+
+    def test_desktop_shell_update_restart_exits_cleanly_with_open_stdin_pipe(self):
+        # Reproduces the Windows Py_FinalizeEx _enter_buffered_busy crash when
+        # watch_desktop_parent held sys.stdin's BufferedReader lock during restart.
+        with TemporaryDirectory() as tmp:
+            script = (
+                "import sys\n"
+                "from pathlib import Path\n"
+                "from unittest.mock import patch\n"
+                "from wardr import cli, server, update_session\n"
+                "from wardr.state import WardrState\n"
+                "orig_init = update_session.UpdateSession.__init__\n"
+                "def ready_init(self, *a, **kw):\n"
+                "    orig_init(self, *a, **kw)\n"
+                "    self._record_installed('9.9.9')\n"
+                "state = WardrState(Path(sys.argv[1]), offline=True)\n"
+                "with (\n"
+                "    patch.object(update_session.UpdateSession, '__init__', ready_init),\n"
+                "    patch.object(state, 'start_scan', lambda *a, **k: None),\n"
+                "    patch.object(state, 'start_exposure', lambda *a, **k: None),\n"
+                "    patch.object(state.monitor, 'start', lambda: None),\n"
+                "    patch.object(state.monitor, 'stop', lambda: None),\n"
+                "    patch.object(state.accounts, 'refresh_broker_providers_async', lambda: None),\n"
+                "):\n"
+                "    outcome = server.serve(state, 0, False, False)\n"
+                "raise SystemExit(cli.DESKTOP_RESTART_EXIT_CODE if outcome is server.RESTART_DASHBOARD else 1)\n"
+            )
+            env = {
+                **os.environ,
+                "WARDR_DESKTOP_SHELL": "1",
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONPATH": str(REPO_ROOT),
+            }
+            proc = subprocess.Popen(
+                [sys.executable, "-c", script, tmp],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            try:
+                launch_line = proc.stdout.readline().strip()
+                self.assertIn("Wardr is running at http://127.0.0.1:", launch_line)
+                launch_url = launch_line.split("Wardr is running at ", 1)[1]
+                origin, nonce = launch_url.split("/#access=", 1)
+
+                exchange_req = Request(
+                    f"{origin}/api/auth/exchange",
+                    data=json.dumps({"nonce": nonce}).encode("utf-8"),
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Origin": origin,
+                    },
+                )
+                with urlopen(exchange_req, timeout=10) as exchange_resp:
+                    self.assertEqual(exchange_resp.status, 200)
+                    token = json.loads(exchange_resp.read().decode("utf-8"))["token"]
+
+                req = Request(
+                    f"{origin}/api/update/restart",
+                    data=b"{}",
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Origin": origin,
+                        "X-Wardr-Token": token,
+                    },
+                )
+                with urlopen(req, timeout=10) as resp:
+                    self.assertEqual(resp.status, 202)
+
+                # Intentionally keep proc.stdin OPEN while Python shuts down,
+                # matching both new and older native desktop hosts.
+                exit_code = proc.wait(timeout=15)
+                rest_out = proc.stdout.read()
+                err_out = proc.stderr.read()
+                self.assertEqual(exit_code, cli.DESKTOP_RESTART_EXIT_CODE, msg=f"stderr:\n{err_out}")
+                self.assertIn("WARDR_DESKTOP_EVENT restart", rest_out)
+                self.assertNotIn("Fatal Python error", err_out)
+                self.assertNotIn("_enter_buffered_busy", err_out)
+            finally:
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                if proc.stderr is not None:
+                    proc.stderr.close()
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
 
 
 if __name__ == "__main__":

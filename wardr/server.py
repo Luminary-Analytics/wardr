@@ -392,6 +392,8 @@ class DashboardRequest(BaseHTTPRequestHandler):
             elif self.path == "/api/update/restart" and not body:
                 self.server.updates.request_restart()
                 self._json(HTTPStatus.ACCEPTED, {"ok": True})
+                if os.environ.get("WARDR_DESKTOP_SHELL") == "1":
+                    print("WARDR_DESKTOP_EVENT restart", flush=True)
                 self.server.shutdown()
             elif self.path == "/api/action/open-settings":
                 identifier = body.get("id")
@@ -567,14 +569,23 @@ def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: boo
             ).start()
         if os.environ.get("WARDR_DESKTOP_SHELL") == "1":
             def watch_desktop_parent() -> None:
+                # Duplicate the raw OS fd so this daemon thread never holds Python's
+                # sys.stdin BufferedReader lock (which aborts Py_FinalizeEx on Windows
+                # with _enter_buffered_busy during in-app update restarts).
                 try:
-                    stream = getattr(sys.stdin, "buffer", sys.stdin)
-                    if stream is None:
-                        return
-                    while stream.read(1):
+                    watch_fd = os.dup(sys.stdin.fileno())
+                except (AttributeError, OSError, ValueError):
+                    return
+                try:
+                    while os.read(watch_fd, 1):
                         pass
-                except (OSError, ValueError):
+                except OSError:
                     pass
+                finally:
+                    try:
+                        os.close(watch_fd)
+                    except OSError:
+                        pass
                 if not stopping.is_set():
                     server.shutdown()
 
