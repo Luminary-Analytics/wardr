@@ -73,7 +73,7 @@ TERMS_SECTIONS: tuple[dict, ...] = (
         "body": (
             "No cybersecurity tool can guarantee 100% immunity against all threats or zero-day attacks. Wardr "
             "provides continuous defense-in-depth visibility, hardening, and verified advisories on an 'AS IS' basis "
-            "under the MIT License (for Wardr Community) without warranty of uninterrupted or error-free protection."
+            "under the MIT License without warranty of uninterrupted or error-free protection."
         ),
     },
     {
@@ -88,7 +88,7 @@ TERMS_SECTIONS: tuple[dict, ...] = (
         "heading": "5. Contact & Security Disclosures",
         "body": (
             "Report security vulnerabilities privately via GitHub Security Advisories (see SECURITY.md). "
-            "Note: Before commercial distribution, have licensed legal counsel review these terms for jurisdiction-specific compliance (GDPR, CCPA, SOC 2)."
+            "If you self-host Wardr services for an organization, review these terms with legal counsel for applicable compliance requirements (GDPR, CCPA, SOC 2)."
         ),
     },
 )

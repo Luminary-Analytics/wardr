@@ -1,4 +1,4 @@
-"""Open-core self-hosted Wardr Fleet control plane for small security teams.
+"""MIT-licensed self-hosted Wardr Fleet control plane for small security teams.
 
 Provides RBAC (admin, responder, viewer), short-lived enrollment tokens,
 per-host cryptographic device tokens, cross-host zero-day/posture correlation,

@@ -3,7 +3,7 @@
 **Effective Date:** November 22, 2026  
 **Policy Version:** `2026-11-22`
 
-> **Notice:** This privacy policy reflects Wardr's technical privacy architecture and security commitments. Have qualified legal counsel review and adapt this document for applicable jurisdictions (GDPR, CCPA/CPRA, etc.) before commercial launch.
+> **Notice:** This privacy policy reflects Wardr's technical privacy architecture and security commitments. If you self-host Wardr services or operate an organization deployment, have qualified legal counsel review and adapt this document for applicable jurisdictions (GDPR, CCPA/CPRA, etc.).
 
 ## 1. Our Security-First Privacy Commitment
 Wardr is engineered as a **local-first** cybersecurity platform. Your private SSH keys, passwords, API tokens, source code contents, and personal files are **never** uploaded to Wardr servers. All device security checks, file-integrity hashes, authorized self-pen-tests, and supply-chain inspections execute locally on your machine.

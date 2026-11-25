@@ -1,16 +1,19 @@
 # Wardr architecture
 
-Wardr Community helps people harden desktops and servers they manage. An
+Wardr is an MIT-licensed security platform that helps individuals and teams
+harden desktops, servers, and fleets they manage. An
 operator should be able to see what a check observed, understand the risk,
 take an appropriate action, and verify the result. Wardr keeps that workflow
 on the assessed host. The public website distributes releases and illustrates
 the workflow with sample data. [Wardr homepage](https://getwardr.com/) ·
-[Company site repository](https://github.com/Luminary-Analytics/wardr-site)
+[Website repository](https://github.com/Luminary-Analytics/wardr-site)
 
-The Community release focuses on single-host posture, local exposure, selected
+The local runtime focuses on single-host posture, local exposure, selected
 event patterns, and matching supplied software inventories to published
-advisories. It requires Python 3.11 or newer. Wardr uses PyCA cryptography
-for Ed25519 verification. Operating-system tools and access vary by platform.
+advisories, while the included Wardr Fleet and Threat Network modules extend
+those same capabilities across teams under the same MIT License. It requires
+Python 3.11 or newer. Wardr uses PyCA cryptography for Ed25519 verification.
+Operating-system tools and access vary by platform.
 
 ## Components and data flow
 
@@ -37,7 +40,7 @@ flowchart TB
         Plan -. "Optional anonymized IDs" .-> Ollama["Local Ollama\n(127.0.0.1:11434)"]
     end
 
-    subgraph OptionalNetwork["Optional Network & Enterprise Extensions (Disabled in --offline)"]
+    subgraph OptionalNetwork["Optional Fleet & Threat Network Extensions (MIT · Disabled in --offline)"]
         CISA["Public CISA KEV Catalog"]
         Feeds["Ed25519-Signed Rapid-Defense Feeds\n(feeds.py · Zero-RCE)"]
         TN["Wardr Threat Network\n(threat_network.py · Clustering & CVD)"]

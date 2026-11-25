@@ -3,7 +3,7 @@
 **Effective Date:** November 22, 2026  
 **Policy Version:** `2026-11-22`
 
-> **Notice:** These Terms of Use reflect Wardr's operational boundaries and open-source licensing. Have qualified legal counsel review and adapt this document before commercial launch.
+> **Notice:** These Terms of Use reflect Wardr's operational boundaries and MIT open-source licensing. If you operate hosted Wardr services for an organization, have qualified legal counsel review and adapt this document for your jurisdiction.
 
 ## 1. Authorized Use Only
 Wardr's security scans, network exposure audits, supply-chain scanners, and Self-Pen-Test probes are designed exclusively for devices, networks, and code repositories that you own or have explicit written authorization to test. You agree not to use or modify Wardr to scan, probe, or disrupt third-party systems without authorization.
@@ -12,7 +12,7 @@ Wardr's security scans, network exposure audits, supply-chain scanners, and Self
 Wardr restricts built-in automated fixes and Self-Pen-Test probes to allowlisted, non-destructive, locally scoped actions. Modifying host firewalls, service bindings (such as localhost-only binding), or file permissions may impact local development workflows. You remain responsible for reviewing confirmation dialogs and maintaining appropriate backups.
 
 ## 3. Open-Source License & Disclaimer of Warranty
-Wardr Community is licensed under the [MIT License](LICENSE). While Wardr strives to deliver defense-in-depth visibility and timely advisories, no security software can prevent every attack or zero-day exploit. Wardr is provided **"AS IS"**, without warranty of any kind, express or implied, to the maximum extent permitted by law.
+The entire Wardr project is open source under the [MIT License](LICENSE). While Wardr strives to deliver defense-in-depth visibility and timely advisories, no security software can prevent every attack or zero-day exploit. Wardr is provided **"AS IS"**, without warranty of any kind, express or implied, to the maximum extent permitted by law.
 
 ## 4. Accounts, SSO & Security Responsibilities
 - You are responsible for safeguarding your Wardr account credentials, SSO sessions, and private local dashboard launch links.

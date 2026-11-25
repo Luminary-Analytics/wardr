@@ -1,6 +1,6 @@
 # Wardr security
 
-Wardr Community uses the MIT License. Wardr's local dashboard accepts authenticated
+Wardr is open source under the [MIT License](LICENSE). Wardr's local dashboard accepts authenticated
 requests on IPv4 loopback (`127.0.0.1`) with strict `Host`, `Origin`, constant-time
 token verification, and a strict Content Security Policy (zero inline scripts or styles).
 The assessment engine reads local security settings, socket tables, event records,

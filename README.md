@@ -1,9 +1,11 @@
-# Wardr Community
+# Wardr
 
-Wardr helps you harden a desktop or server you manage. The goal is to show
+Wardr helps you harden any desktop, workstation, server, or fleet you manage. The goal is to show
 what a machine exposes, explain the evidence behind each finding, and make it
-clear how to fix and verify security gaps. Community is free under the
-[MIT License](LICENSE).
+clear how to fix and verify security gaps. The entire Wardr project—including
+the local dashboard, CLI, Self-Pen-Test Lab, Supply-Chain Scanner, Wardr Fleet
+control plane, Threat Network server, and native desktop wrappers—is free and
+open source under the [MIT License](LICENSE).
 
 The installed application checks host settings, inventories local network
 bindings, correlates selected security events, and matches supplied software
@@ -23,6 +25,8 @@ remediation plan. [Wardr homepage and demo](https://getwardr.com/)
   Ed25519 feed schemas, and clustering intake server.
 - [Development and operations](docs/DEVELOPMENT.md) covers running from
   source, troubleshooting, native checks, builds, and the release workflow.
+- [Contributing guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
+  explain how to develop, test, and submit MIT-licensed contributions.
 - [Security policy](SECURITY.md) covers vulnerability reporting, release
   verification, and our [full Security Audit Report](docs/security-audit.md).
 - [Privacy Policy](PRIVACY.md) and [Terms of Use](TERMS.md) document Wardr's
@@ -54,12 +58,12 @@ To install from the wheel, use Python 3.11 or later and run these commands
 from your downloads folder. [Set up pipx](https://pipx.pypa.io/stable/)
 
 ```console
-pipx install ./wardr-0.3.1-py3-none-any.whl
+pipx install ./wardr-0.4.2-py3-none-any.whl
 wardr
 ```
 
-To upgrade from v0.2.0, close Wardr, download the v0.3.1 wheel, and run
-`pipx install --force ./wardr-0.3.1-py3-none-any.whl` once. Launch Wardr again
+To upgrade from v0.2.0, close Wardr, download the latest wheel, and run
+`pipx install --force ./wardr-0.4.2-py3-none-any.whl` once. Launch Wardr again
 as the account whose security settings you want to check.
 
 ## Dashboard
@@ -246,14 +250,14 @@ The Blender scene, procedural render, and editable TripoSR mesh are in
 `design/`. The installed app ships the rendered PNG.
 [TripoSR project](https://github.com/VAST-AI-Research/TripoSR)
 
-Wardr Community releases starting with v0.2.1 have Ed25519-signed manifests.
+Wardr releases starting with v0.2.1 have Ed25519-signed manifests.
 To verify a download manually, use the matching version's manifest and
 detached signature, and a trusted public key obtained independently. Wardr
 verifies downloads offline using PyCA cryptography without an OpenSSL
 command. [Release downloads](https://getwardr.com/#release)
 
 ```console
-wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.3.1-py3-none-any.whl
+wardr verify-release --manifest release.json --signature release.json.sig --public-key trusted.pem wardr-0.4.2-py3-none-any.whl
 ```
 
 See the [security policy](SECURITY.md) for private vulnerability reporting and

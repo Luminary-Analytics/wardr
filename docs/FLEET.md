@@ -1,6 +1,6 @@
 # Wardr Fleet Operations & Architecture Guide
 
-**Wardr Fleet** is an open-core, zero-extra-dependency control plane, check-in agent, and bundled web console built directly into Wardr (`v0.3.1+`). It is designed so a small core security or IT team (1–5 operators) can monitor, correlate, and safely harden fleets of Linux, macOS, and Windows servers and user computers—without giving any remote server arbitrary code execution on endpoints.
+**Wardr Fleet** is a free, MIT-licensed, zero-extra-dependency control plane, check-in agent, and bundled web console built directly into Wardr (`v0.3.1+`). It is designed so a small core security or IT team (1–5 operators) can monitor, correlate, and safely harden fleets of Linux, macOS, and Windows servers and user computers—without giving any remote server arbitrary code execution on endpoints.
 
 ## Architecture and trust boundaries
 
