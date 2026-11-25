@@ -352,7 +352,7 @@ class WardrState:
                 changed = True
                 enriched.append(item)
                 continue
-            if item.get("status") == "fail":
+            if item.get("status") in ("fail", "unknown"):
                 if entry.get("evidence_hash") != _evidence_hash(item):
                     self._dispositions.pop(check_id, None)
                     changed = True
@@ -405,8 +405,8 @@ class WardrState:
                 snapshot = self._scan or {}
                 items = snapshot.get("checks", [])
                 target = next((item for item in items if item.get("id") == check_id), None)
-                if not target or target.get("status") != "fail":
-                    raise ValueError("Only an active failing check from the latest scan can be marked queued or handled.")
+                if not target or target.get("status") not in ("fail", "unknown"):
+                    raise ValueError("Only an active failing or unverified check from the latest scan can be marked queued or handled.")
                 now = datetime.now(timezone.utc)
                 expires_at = (now + timedelta(days=7)).isoformat(timespec="seconds") if kind == "queued" else None
                 entry = {
@@ -431,6 +431,46 @@ class WardrState:
         if save_copy is not None:
             save_local_json(self.dispositions_path, {"version": 1, "items": save_copy})
         return result
+
+    def set_check_dispositions_batch(self, check_ids: list[str], kind: str, note: str = "") -> dict:
+        if kind not in ("queued", "acknowledged", "clear"):
+            raise ValueError("Choose queued, acknowledged, or clear for check status.")
+        if not isinstance(note, str) or len(note) > 240:
+            raise ValueError("Disposition note must be 240 characters or fewer.")
+        if not isinstance(check_ids, list) or not check_ids or len(check_ids) > 64:
+            raise ValueError("Provide between 1 and 64 check IDs.")
+        cleaned_note = note.strip()
+        updated: list[str] = []
+        save_copy = None
+        with self._lock:
+            snapshot = self._scan or {}
+            by_id = {str(item.get("id") or ""): item for item in snapshot.get("checks", []) if item.get("id")}
+            now = datetime.now(timezone.utc)
+            for raw_id in check_ids:
+                if not isinstance(raw_id, str) or not raw_id or len(raw_id) > 120:
+                    raise ValueError("Provide valid check IDs.")
+                if kind == "clear":
+                    if self._dispositions.pop(raw_id, None) is not None:
+                        updated.append(raw_id)
+                else:
+                    target = by_id.get(raw_id)
+                    if not target or target.get("status") not in ("fail", "unknown"):
+                        continue
+                    effective_kind = "queued" if (kind == "queued" or (kind == "acknowledged" and raw_id.endswith("-pending-updates"))) else kind
+                    expires_at = (now + timedelta(days=7)).isoformat(timespec="seconds") if effective_kind == "queued" else None
+                    self._dispositions[raw_id] = {
+                        "kind": effective_kind,
+                        "at": now.isoformat(timespec="seconds"),
+                        "expires_at": expires_at,
+                        "evidence_hash": _evidence_hash(target),
+                        "note": cleaned_note,
+                    }
+                    updated.append(raw_id)
+            if updated:
+                save_copy = dict(self._dispositions)
+        if save_copy is not None:
+            save_local_json(self.dispositions_path, {"version": 1, "items": save_copy})
+        return {"ok": True, "updated": updated, "count": len(updated)}
 
     def status(self) -> dict:
         save_copy = None

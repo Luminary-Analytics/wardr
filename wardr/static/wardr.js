@@ -57,6 +57,9 @@ const state = {
   pendingFix: false,
   pendingBatchFix: false,
   pendingScriptTarget: null,
+  openGreenChecklistAfterFix: false,
+  greenSelectedIds: new Set(),
+  pendingGreenApply: false,
   workflow: {
     mode: null,
     activeId: null,
@@ -309,7 +312,13 @@ function statusBadge(label, tone) {
 
 function isHandledCheck(check) {
   const kind = check?.disposition?.kind;
-  return check?.status === "fail" && (kind === "queued" || kind === "acknowledged");
+  return (check?.status === "fail" || check?.status === "unknown") && (kind === "queued" || kind === "acknowledged");
+}
+
+function openActionableChecks(scan) {
+  return sortedChecks(scan?.checks || []).filter(
+    (c) => (c.status === "fail" || c.status === "unknown") && !isHandledCheck(c),
+  );
 }
 
 function isUpdateCheck(check) {
@@ -323,6 +332,14 @@ function dispositionMeta(check) {
       shortLabel: "Mark queued",
       actionLabel: "Mark queued (pending restart)",
       badgeLabel: "Queued · Pending restart",
+    };
+  }
+  if (check?.status === "unknown") {
+    return {
+      kind: "acknowledged",
+      shortLabel: "Mark verified",
+      actionLabel: "Mark verified / fixed",
+      badgeLabel: "Verified manually",
     };
   }
   return {
@@ -496,7 +513,7 @@ function findingCard(check, open) {
       button.addEventListener("click", () => showFix(check.id));
       actions.append(button);
     }
-    if (check.status === "fail" && check.action_guide?.can_open_settings) {
+    if ((check.status === "fail" || check.status === "unknown") && check.action_guide?.can_open_settings) {
       const sBtn = make("button", "button button-settings button-small", (check.action_guide.settings_label || "Open Settings") + " ↗");
       sBtn.type = "button";
       sBtn.addEventListener("click", () => openCheckSettings(check.id));
@@ -508,7 +525,7 @@ function findingCard(check, open) {
       scBtn.addEventListener("click", () => promptScriptFixes([check]));
       actions.append(scBtn);
     }
-    if (check.status === "fail") {
+    if (check.status === "fail" || check.status === "unknown") {
       const ackBtn = make("button", "button button-ack button-small", dispMeta.actionLabel);
       ackBtn.type = "button";
       ackBtn.dataset.disposition = check.id;
@@ -521,10 +538,12 @@ function findingCard(check, open) {
         manualBtn.addEventListener("click", () => setCheckDisposition(check.id, "acknowledged"));
         actions.append(manualBtn);
       }
-      const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
-      reportBtn.type = "button";
-      reportBtn.addEventListener("click", () => openIssueReport("finding", check.id));
-      actions.append(reportBtn);
+      if (check.status === "fail") {
+        const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
+        reportBtn.type = "button";
+        reportBtn.addEventListener("click", () => openIssueReport("finding", check.id));
+        actions.append(reportBtn);
+      }
     }
   }
   if (actions.childElementCount) body.append(actions);
@@ -571,7 +590,7 @@ function fallbackPosture(scan) {
   const handled = checks.filter((c) => isHandledCheck(c));
   const passed = checks.filter((c) => c.status === "pass");
   const addressed = passed.length + handled.length;
-  const unknown = checks.filter((c) => c.status === "unknown");
+  const unknown = checks.filter((c) => c.status === "unknown" && !isHandledCheck(c));
   const securable = addressed + attention.length + unknown.length;
   const ready = Boolean(scan?.updated_at);
   const red = attention.some((c) => c.severity === "critical" || c.severity === "high");
@@ -651,36 +670,25 @@ function showPosture(data) {
       : "Run a scan to verify everything Wardr can secure.");
   }
 
-  // One-click Fix-to-Green CTA directly on the Overview hero card
+  // One-click Fix-to-Green CTA directly on the Overview hero card whenever device is not Green
   const heroFixBtn = element("hero-fix-button");
-  const allChecks = sortedChecks(scan?.checks || []);
-  const openFailing = allChecks.filter((c) => c.status === "fail" && !isHandledCheck(c));
-  const autoFixable = openFailing.filter((c) => c.can_fix === true || c.action_guide?.can_script_fix === true);
-  const firstSettings = openFailing.find((c) => c.action_guide?.can_open_settings);
-  if (!ready || openFailing.length === 0) {
+  const openItems = openActionableChecks(scan);
+  const autoFixable = openItems.filter((c) => c.status === "fail" && (c.can_fix === true || c.action_guide?.can_script_fix === true));
+  if (!ready || openItems.length === 0) {
     heroFixBtn.hidden = true;
     heroFixBtn.dataset.mode = "";
     heroFixBtn.dataset.settingsId = "";
-  } else if (autoFixable.length > 0) {
-    heroFixBtn.hidden = false;
-    heroFixBtn.dataset.mode = "fix";
-    heroFixBtn.dataset.settingsId = "";
-    setText(
-      "hero-fix-label",
-      autoFixable.length === openFailing.length
-        ? (autoFixable.length === 1 ? "Fix 1 issue → Green" : "Fix All (" + numberFormat.format(autoFixable.length) + ") → Green")
-        : "Fix & Protect (" + numberFormat.format(autoFixable.length) + ")",
-    );
-  } else if (firstSettings) {
-    heroFixBtn.hidden = false;
-    heroFixBtn.dataset.mode = "settings";
-    heroFixBtn.dataset.settingsId = firstSettings.id;
-    setText("hero-fix-label", "Fix: " + (firstSettings.action_guide.settings_label || "Open Settings") + " ↗");
   } else {
     heroFixBtn.hidden = false;
-    heroFixBtn.dataset.mode = "review";
+    heroFixBtn.dataset.mode = "green-flow";
     heroFixBtn.dataset.settingsId = "";
-    setText("hero-fix-label", "Review " + plural(openFailing.length, "issue") + " →");
+    const count = openItems.length;
+    setText(
+      "hero-fix-label",
+      autoFixable.length > 0
+        ? (count === 1 ? "Fix 1 item → Go Green" : "Fix All (" + numberFormat.format(count) + ") → Go Green")
+        : (count === 1 ? "Fix 1 item → Go Green" : "Fix All (" + numberFormat.format(count) + ") → Go Green"),
+    );
   }
 
   // Last scan depth summary on Hero
@@ -788,7 +796,7 @@ function showScan(scan) {
   const securable = checks.filter((check) => check.status !== "not_applicable");
   const attention = checks.filter((check) => check.status === "fail" && !isHandledCheck(check));
   const handled = checks.filter((check) => isHandledCheck(check));
-  const unknown = checks.filter((check) => check.status === "unknown");
+  const unknown = checks.filter((check) => check.status === "unknown" && !isHandledCheck(check));
   const passed = checks.filter((check) => check.status === "pass");
   const addressed = [...handled, ...passed];
   const fixable = attention.filter((check) => check.can_fix === true);
@@ -808,18 +816,19 @@ function showScan(scan) {
   setText("pill-count-unknown", numberFormat.format(unknown.length));
 
   const handledSuffix = handled.length ? " · " + plural(handled.length, "queued / handled") : "";
+  const openTotal = attention.length + unknown.length;
   setText("overview-checklist-subtitle", ready
     ? numberFormat.format(passed.length) + " of " + plural(securable.length, "securable check") + " verified secure"
       + handledSuffix
-      + (attention.length ? " · " + plural(attention.length, "item") + " need attention" : " · Everything securable is addressed")
+      + (openTotal ? " · " + plural(openTotal, "item") + " left to reach Green" : " · Everything securable is addressed")
     : waiting);
 
-  const scriptFixable = attention.filter((check) => check.can_fix !== true && check.action_guide?.can_script_fix === true);
-  const repairable = [...fixable, ...scriptFixable];
   const fixAllBtn = element("checklist-fix-all");
-  fixAllBtn.hidden = !(ready && repairable.length > 0);
-  if (repairable.length > 0) {
-    setText("checklist-fix-all-label", "Fix & Protect All (" + numberFormat.format(repairable.length) + ")");
+  fixAllBtn.hidden = !(ready && openTotal > 0);
+  if (openTotal > 0) {
+    setText("checklist-fix-all-label", openTotal === 1
+      ? "Fix 1 item → Go Green"
+      : "Fix All (" + numberFormat.format(openTotal) + ") → Go Green");
   }
   if (ready && repairable.length > 0) {
     setText("overview-fixable-note", plural(repairable.length, "issue") + " can be fixed & protected right now with one click.");
@@ -1243,10 +1252,9 @@ function renderWorkflowStage(data) {
   });
 
   const panel = element("workflow-actions-panel");
-  const checks = sortedChecks(scan.checks || []);
-  const failing = checks.filter((c) => c.status === "fail" && !isHandledCheck(c));
-  const fixable = failing.filter((c) => c.can_fix === true);
-  const scriptFixable = failing.filter((c) => c.can_fix !== true && c.action_guide?.can_script_fix === true);
+  const failing = openActionableChecks(scan);
+  const fixable = failing.filter((c) => c.status === "fail" && c.can_fix === true);
+  const scriptFixable = failing.filter((c) => c.status === "fail" && c.can_fix !== true && c.action_guide?.can_script_fix === true);
   const repairable = [...fixable, ...scriptFixable];
   const manualOnly = failing.filter((c) => !repairable.includes(c));
 
@@ -1258,24 +1266,33 @@ function renderWorkflowStage(data) {
     return;
   }
 
+  // If auto-fix just completed and manual items still remain, open the guided checklist automatically.
+  if (isFix && state.openGreenChecklistAfterFix && failing.length > 0 && !element("green-checklist-dialog").open) {
+    state.openGreenChecklistAfterFix = false;
+    if (element("mission-dialog").open) element("mission-dialog").close();
+    openGreenChecklistModal();
+  }
+
   panel.hidden = false;
   const fixBtn = element("workflow-fix-all");
   const fixingNow = state.pendingBatchFix || state.pendingFix || scan.fix_running === true;
-  fixBtn.hidden = repairable.length === 0;
+  fixBtn.hidden = failing.length === 0;
   fixBtn.disabled = !state.connected || fixingNow || scan.state === "running";
-  if (repairable.length > 0) {
-    setText("workflow-fix-all-label", "Fix & Protect All (" + numberFormat.format(repairable.length) + ")");
+  if (failing.length > 0) {
+    setText("workflow-fix-all-label", failing.length === 1
+      ? "Fix 1 item → Go Green"
+      : "Fix All (" + numberFormat.format(failing.length) + ") → Go Green");
   }
 
   if (failing.length === 0) {
     setText("workflow-actions-title", "Everything Wardr can secure is protected");
-    setText("workflow-actions-note", "All securable checks are verified or queued with zero remaining open items.");
+    setText("workflow-actions-note", "All securable checks are verified or handled with zero remaining open items.");
   } else if (repairable.length > 0) {
-    setText("workflow-actions-title", plural(failing.length, "issue") + " ready to fix");
-    setText("workflow-actions-note", "Click Fix & Protect All to patch automatically, or use the per-item buttons to jump straight to Settings.");
+    setText("workflow-actions-title", plural(failing.length, "item") + " left to reach Green");
+    setText("workflow-actions-note", "Click Fix All to auto-fix eligible issues and walk through any remaining manual items.");
   } else {
-    setText("workflow-actions-title", plural(manualOnly.length, "guided OS step") + " to complete protection");
-    setText("workflow-actions-note", "Jump straight to the Settings pane, or mark an already-queued update / manual fix as handled.");
+    setText("workflow-actions-title", plural(manualOnly.length, "manual step") + " left to reach Green");
+    setText("workflow-actions-note", "Click Fix All to open the guided checklist with quick Settings links and one-click sign-off.");
   }
 
   const todoSignature = failing.map((c) => [c.id, c.title, c.severity, c.can_fix, c.disposition?.kind, c.action_guide?.can_open_settings, c.action_guide?.can_script_fix]);
@@ -1318,7 +1335,9 @@ function renderMissionModal(data, isFix, displaySteps, allRevealed, pct, failing
       : (runningStep ? runningStep.label + " — " + runningStep.detail : "Applying protections…"));
   } else {
     setText("mission-title", allRevealed
-      ? (failing.length === 0 ? "Your device is protected" : posture.headline || "Scan complete")
+      ? (failing.length === 0 && posture.level === "green"
+        ? "Your device is protected"
+        : posture.headline || "Almost fully protected")
       : "Sweeping " + (scan.profile_label || "device scan").toLowerCase() + "…");
     setText("mission-ticker", allRevealed
       ? (posture.summary || plural(posture.secured || 0, "check") + " verified secure.")
@@ -1338,30 +1357,28 @@ function renderMissionModal(data, isFix, displaySteps, allRevealed, pct, failing
 
   const fixBtn = element("mission-fix-all");
   const fixingNow = state.pendingBatchFix || state.pendingFix || scan.fix_running === true;
-  const firstSettingsOnly = manualOnly.find((c) => c.action_guide?.can_open_settings);
-  fixBtn.hidden = repairable.length === 0 && !firstSettingsOnly;
+  fixBtn.hidden = failing.length === 0;
   fixBtn.disabled = !state.connected || fixingNow || scan.state === "running";
-  if (repairable.length > 0) {
-    fixBtn.dataset.mode = "fix";
+  if (failing.length > 0) {
+    fixBtn.dataset.mode = "green-flow";
     fixBtn.dataset.settingsId = "";
-    setText("mission-fix-all-label", "FIX & PROTECT ALL (" + numberFormat.format(repairable.length) + ")");
-  } else if (firstSettingsOnly) {
-    fixBtn.dataset.mode = "settings";
-    fixBtn.dataset.settingsId = firstSettingsOnly.id;
-    setText("mission-fix-all-label", (firstSettingsOnly.action_guide.settings_label || "Open System Settings") + " ↗");
+    setText(
+      "mission-fix-all-label",
+      failing.length === 1
+        ? "FIX 1 ITEM → GO GREEN"
+        : "FIX ALL (" + numberFormat.format(failing.length) + ") → GO GREEN",
+    );
   }
 
   if (failing.length === 0) {
     setText("mission-actions-title", "All securable checks passed");
     setText("mission-actions-note", "Everything Wardr can secure on this device is locked down and continuously monitored.");
   } else if (repairable.length > 0) {
-    setText("mission-actions-title", plural(failing.length, "issue") + " found — ready to fix");
-    setText("mission-actions-note", "Click FIX & PROTECT ALL to run Wardr's allowlisted fixes, or click any item below to open Settings or fix individually.");
+    setText("mission-actions-title", plural(failing.length, "item") + " left to reach 100% Green");
+    setText("mission-actions-note", "Click FIX ALL to automatically fix eligible issues and walk through any remaining manual steps.");
   } else {
-    const whyNote = firstSettingsOnly?.action_guide?.script_note
-      || "This OS-level control requires Apple/OS confirmation directly in System Settings.";
-    setText("mission-actions-title", plural(manualOnly.length, "OS-managed step") + " left to reach 100%");
-    setText("mission-actions-note", whyNote);
+    setText("mission-actions-title", plural(manualOnly.length, "manual step") + " left to reach 100% Green");
+    setText("mission-actions-note", "Click FIX ALL to open the guided checklist—jump right to Settings or check off verified items in seconds.");
   }
 
   const todoSignature = failing.map((c) => [c.id, c.title, c.severity, c.can_fix, c.disposition?.kind, c.action_guide?.can_open_settings, c.action_guide?.can_script_fix]);
@@ -1419,10 +1436,13 @@ function renderVisualReportModal(data) {
   setText("vrep-count-threats", numberFormat.format(threats.count || 0));
   element("vrep-tile-threats").dataset.clear = String((threats.count || 0) === 0);
 
+  const openVrepItems = openActionableChecks(scan);
   const vrepFix = element("vrep-fix-all");
-  vrepFix.hidden = repairable.length === 0;
-  if (repairable.length > 0) {
-    setText("vrep-fix-all-label", "Fix & Protect All (" + numberFormat.format(repairable.length) + ")");
+  vrepFix.hidden = openVrepItems.length === 0;
+  if (openVrepItems.length > 0) {
+    setText("vrep-fix-all-label", openVrepItems.length === 1
+      ? "Fix 1 item → Go Green"
+      : "Fix All (" + numberFormat.format(openVrepItems.length) + ") → Go Green");
   }
 
   replaceWhenChanged("vrep-checklist", securable, () => {
@@ -1896,11 +1916,171 @@ function promptScriptFixes(checksToFix) {
   element("script-confirm-dialog").showModal();
 }
 
+function renderGreenChecklistModal() {
+  const items = openActionableChecks(state.data?.scan);
+  const validIds = new Set(items.map((c) => c.id));
+  for (const id of Array.from(state.greenSelectedIds)) {
+    if (!validIds.has(id)) state.greenSelectedIds.delete(id);
+  }
+  const list = element("green-checklist-items");
+  if (!items.length) {
+    if (element("green-checklist-dialog").open) element("green-checklist-dialog").close();
+    return;
+  }
+
+  setText(
+    "green-dialog-title",
+    items.length === 1
+      ? "1 step left to reach 100% Green"
+      : numberFormat.format(items.length) + " steps left to reach 100% Green",
+  );
+  setText(
+    "green-select-all-label",
+    "Select all (" + numberFormat.format(items.length) + ")",
+  );
+
+  const selectedCount = state.greenSelectedIds.size;
+  const selectAllBox = element("green-select-all");
+  selectAllBox.checked = selectedCount === items.length && items.length > 0;
+  selectAllBox.indeterminate = selectedCount > 0 && selectedCount < items.length;
+  setText("green-selected-counter", numberFormat.format(selectedCount) + " of " + numberFormat.format(items.length) + " checked");
+
+  const applyBtn = element("green-mark-fixed-btn");
+  applyBtn.disabled = state.pendingGreenApply || selectedCount === 0;
+  if (state.pendingGreenApply) {
+    setText("green-mark-fixed-btn", "Updating…");
+  } else if (selectedCount === items.length && selectedCount > 0) {
+    setText("green-mark-fixed-btn", "Mark all fixed → Go Green");
+  } else if (selectedCount > 0) {
+    setText("green-mark-fixed-btn", "Mark " + numberFormat.format(selectedCount) + " fixed");
+  } else {
+    setText("green-mark-fixed-btn", "Mark fixed → Go Green");
+  }
+
+  list.replaceChildren(...items.map((check) => {
+    const checked = state.greenSelectedIds.has(check.id);
+    const row = make("li", "green-item");
+    row.dataset.checked = String(checked);
+
+    const checkbox = make("input", "green-item-check");
+    checkbox.type = "checkbox";
+    checkbox.id = "green-chk-" + check.id;
+    checkbox.checked = checked;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.greenSelectedIds.add(check.id);
+      else state.greenSelectedIds.delete(check.id);
+      renderGreenChecklistModal();
+    });
+
+    const content = make("div", "green-item-content");
+    const head = make("div", "green-item-head");
+    const titleLabel = make("label", "green-item-title", check.title);
+    titleLabel.htmlFor = checkbox.id;
+    const badge = make(
+      "span",
+      "status-label",
+      check.status === "unknown" ? "Manual check" : "Needs action",
+    );
+    badge.dataset.tone = check.status === "unknown" ? "unknown" : check.severity;
+    head.append(titleLabel, badge);
+
+    const stepText = check.remediation || check.action_guide?.script_note || "Verify this setting on your device, then check the box once confirmed.";
+    const step = make("p", "green-item-step", stepText);
+    const evidence = make("p", "green-item-evidence", check.evidence || "");
+
+    const actions = make("div", "green-item-actions");
+    if (check.status === "fail" && (check.can_fix === true || check.action_guide?.can_script_fix === true)) {
+      const autoBtn = make("button", "button button-protect button-small", "Auto-fix now");
+      autoBtn.type = "button";
+      autoBtn.addEventListener("click", () => {
+        if (element("green-checklist-dialog").open) element("green-checklist-dialog").close();
+        promptScriptFixes([check]);
+      });
+      actions.append(autoBtn);
+    }
+    if (check.action_guide?.can_open_settings) {
+      const settingsBtn = make(
+        "button",
+        "button button-settings button-small",
+        (check.action_guide.settings_label || "Open System Settings") + " ↗",
+      );
+      settingsBtn.type = "button";
+      settingsBtn.addEventListener("click", () => openCheckSettings(check.id));
+      actions.append(settingsBtn);
+    }
+    if (check.reference?.url) {
+      const guideLink = make("a", "button button-secondary button-small", (check.reference.label || "How-to guide") + " ↗");
+      guideLink.href = check.reference.url;
+      guideLink.target = "_blank";
+      guideLink.rel = "noopener noreferrer";
+      actions.append(guideLink);
+    }
+
+    content.append(head, step);
+    if (check.evidence) content.append(evidence);
+    if (actions.childElementCount) content.append(actions);
+    row.append(checkbox, content);
+    return row;
+  }));
+}
+
+function openGreenChecklistModal() {
+  const items = openActionableChecks(state.data?.scan);
+  if (!items.length) return;
+  state.greenSelectedIds = new Set();
+  element("green-dialog-error").hidden = true;
+  if (element("mission-dialog").open) element("mission-dialog").close();
+  if (element("visual-report-dialog").open) element("visual-report-dialog").close();
+  renderGreenChecklistModal();
+  const dialog = element("green-checklist-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+async function applyGreenChecklistSelection() {
+  const ids = Array.from(state.greenSelectedIds);
+  if (!ids.length || state.pendingGreenApply) return;
+  state.pendingGreenApply = true;
+  element("green-dialog-error").hidden = true;
+  renderGreenChecklistModal();
+  try {
+    await request("/api/check/disposition/batch", {
+      ids,
+      kind: "acknowledged",
+      note: "Verified or fixed via Wardr Get-to-Green checklist.",
+    });
+    state.greenSelectedIds.clear();
+    await refreshAfterAction();
+    const remaining = openActionableChecks(state.data?.scan);
+    if (remaining.length === 0) {
+      if (element("green-checklist-dialog").open) element("green-checklist-dialog").close();
+      state.actionNotice = { error: false, text: "All remaining items marked resolved — your device is now 100% Green Protected!" };
+      renderNotice();
+    } else {
+      renderGreenChecklistModal();
+    }
+  } catch (error) {
+    setText("green-dialog-error", errorText(error, "Could not update selected checks."));
+    element("green-dialog-error").hidden = false;
+  } finally {
+    state.pendingGreenApply = false;
+    if (element("green-checklist-dialog").open) renderGreenChecklistModal();
+  }
+}
+
 function triggerFixAll() {
-  const checks = sortedChecks(state.data?.scan?.checks || []);
-  const repairable = checks.filter((c) => c.status === "fail" && !isHandledCheck(c) && (c.can_fix === true || c.action_guide?.can_script_fix === true));
-  if (!repairable.length) return;
-  promptScriptFixes(repairable);
+  const openItems = openActionableChecks(state.data?.scan);
+  if (!openItems.length) return;
+  const repairable = openItems.filter(
+    (c) => c.status === "fail" && (c.can_fix === true || c.action_guide?.can_script_fix === true),
+  );
+  const remainingManual = openItems.filter((c) => !repairable.includes(c));
+  if (repairable.length > 0) {
+    state.openGreenChecklistAfterFix = remainingManual.length > 0;
+    promptScriptFixes(repairable);
+  } else {
+    state.openGreenChecklistAfterFix = false;
+    openGreenChecklistModal();
+  }
 }
 
 async function startBatchFix(ids = null, includeScripts = false) {
@@ -3678,20 +3858,21 @@ element("local-model-review").addEventListener("click", () => runModelAction(tru
 element("scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("hero-scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("hero-scan-depth").addEventListener("click", openScanDialog);
-element("hero-fix-button").addEventListener("click", () => {
-  const btn = element("hero-fix-button");
-  if (btn.dataset.mode === "fix") {
-    triggerFixAll();
-  } else if (btn.dataset.mode === "settings" && btn.dataset.settingsId) {
-    openCheckSettings(btn.dataset.settingsId);
-    state.overviewFilter = "attention";
-    if (state.data) render(state.data);
-    element("priority-list")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+element("hero-fix-button").addEventListener("click", triggerFixAll);
+element("close-green-dialog").addEventListener("click", () => element("green-checklist-dialog").close());
+element("green-select-all").addEventListener("change", () => {
+  const items = openActionableChecks(state.data?.scan);
+  if (element("green-select-all").checked) {
+    state.greenSelectedIds = new Set(items.map((c) => c.id));
   } else {
-    state.overviewFilter = "attention";
-    if (state.data) render(state.data);
-    element("priority-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    state.greenSelectedIds.clear();
   }
+  renderGreenChecklistModal();
+});
+element("green-mark-fixed-btn").addEventListener("click", applyGreenChecklistSelection);
+element("green-rescan-btn").addEventListener("click", () => {
+  if (element("green-checklist-dialog").open) element("green-checklist-dialog").close();
+  startScan(state.selectedScanProfile);
 });
 window.__wardrOnFocus = () => {
   if (state.connected) refresh();
@@ -3705,14 +3886,7 @@ element("cancel-scan-dialog").addEventListener("click", () => element("scan-dial
 element("confirm-scan-dialog").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("workflow-fix-all").addEventListener("click", triggerFixAll);
 element("checklist-fix-all").addEventListener("click", triggerFixAll);
-element("mission-fix-all").addEventListener("click", () => {
-  const btn = element("mission-fix-all");
-  if (btn.dataset.mode === "settings" && btn.dataset.settingsId) {
-    openCheckSettings(btn.dataset.settingsId);
-  } else {
-    triggerFixAll();
-  }
-});
+element("mission-fix-all").addEventListener("click", triggerFixAll);
 element("vrep-fix-all").addEventListener("click", triggerFixAll);
 element("cancel-script-dialog").addEventListener("click", () => element("script-confirm-dialog").close());
 element("confirm-script-dialog").addEventListener("click", () => {

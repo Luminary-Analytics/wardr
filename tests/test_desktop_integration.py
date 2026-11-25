@@ -90,6 +90,49 @@ class DesktopShellIntegrationTests(unittest.TestCase):
         self.assertIn('print("WARDR_DESKTOP_EVENT focus", flush=True)', server_src)
         self.assertIn("launch_url=None if desktop_shell else self.server.issue_launch_url()", server_src)
 
+    def test_batch_disposition_turns_unverified_and_manual_checks_green(self):
+        from wardr.report import assess_posture
+        from wardr.state import WardrState
+
+        with TemporaryDirectory() as tmp:
+            state = WardrState(Path(tmp), offline=True)
+            state._scan = {
+                "scanned_at": "2026-11-25T10:00:00+00:00",
+                "checks": [
+                    {"id": "windows-firewall", "title": "Firewall", "status": "pass", "severity": "high", "evidence": "ok"},
+                    {"id": "windows-bitlocker", "title": "BitLocker", "status": "unknown", "severity": "high", "evidence": "unverified"},
+                    {"id": "windows-pending-updates", "title": "Updates", "status": "fail", "severity": "medium", "evidence": "1 update"},
+                ],
+            }
+            before = assess_posture(state.enriched_scan_snapshot())
+            self.assertEqual(before["level"], "amber")
+            self.assertEqual(before["unverified"], 1)
+            self.assertEqual(before["failed"], 1)
+
+            result = state.set_check_dispositions_batch(
+                ["windows-bitlocker", "windows-pending-updates"],
+                "acknowledged",
+                note="Confirmed via Get-to-Green checklist",
+            )
+            self.assertEqual(result["count"], 2)
+
+            after = assess_posture(state.enriched_scan_snapshot())
+            self.assertEqual(after["level"], "green")
+            self.assertTrue(after["as_safe_as_possible"])
+            self.assertEqual(after["unverified"], 0)
+            self.assertEqual(after["failed"], 0)
+            self.assertEqual(after["coverage_pct"], 100)
+            # Pending updates auto-uses 'queued' so reboot auto-verifies
+            self.assertEqual(after["queued"], 1)
+            self.assertEqual(after["acknowledged"], 1)
+
+            # Changing evidence automatically invalidates the disposition and re-alerts
+            state._scan["checks"][1]["status"] = "fail"
+            state._scan["checks"][1]["evidence"] = "BitLocker disabled"
+            recheck = assess_posture(state.enriched_scan_snapshot())
+            self.assertEqual(recheck["level"], "red")
+            self.assertEqual(recheck["failed"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

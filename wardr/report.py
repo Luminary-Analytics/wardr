@@ -92,7 +92,7 @@ footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #d5e0d2;font-size:.
 
 def _is_handled(check: dict) -> bool:
     disp = check.get("disposition")
-    return check.get("status") == "fail" and isinstance(disp, dict) and disp.get("kind") in ("queued", "acknowledged")
+    return check.get("status") in ("fail", "unknown") and isinstance(disp, dict) and disp.get("kind") in ("queued", "acknowledged")
 
 
 def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats: dict | None = None) -> dict:
@@ -101,6 +101,7 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
     ready = bool((scan or {}).get("scanned_at") or (scan or {}).get("updated_at"))
     outcomes = Counter(check.get("status") for check in checks)
     unhandled_failures = [check for check in checks if check.get("status") == "fail" and not _is_handled(check)]
+    unhandled_unverified = [check for check in checks if check.get("status") == "unknown" and not _is_handled(check)]
     handled_items = [check for check in checks if _is_handled(check)]
     queued_count = sum(1 for check in handled_items if check["disposition"]["kind"] == "queued")
     acked_count = sum(1 for check in handled_items if check["disposition"]["kind"] == "acknowledged")
@@ -111,7 +112,7 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
     handled = len(handled_items)
     addressed = secured + handled
     failed = len(unhandled_failures)
-    unverified = outcomes["unknown"]
+    unverified = len(unhandled_unverified)
     not_applicable = outcomes["not_applicable"]
     securable_total = secured + handled + failed + unverified
     fixable = sum(1 for check in unhandled_failures if check.get("can_fix") is True)

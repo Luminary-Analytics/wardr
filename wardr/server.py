@@ -410,6 +410,19 @@ class DashboardRequest(BaseHTTPRequestHandler):
                 ):
                     raise ValueError("Provide a valid check ID and status (queued, acknowledged, or clear).")
                 self._json(HTTPStatus.OK, self.server.state.set_check_disposition(identifier, kind, note=note))
+            elif self.path == "/api/check/disposition/batch":
+                ids = body.get("ids")
+                kind = body.get("kind")
+                note = body.get("note", "")
+                if (
+                    not body.keys() <= {"ids", "kind", "note"}
+                    or not isinstance(ids, list) or not 1 <= len(ids) <= 64
+                    or not all(isinstance(item, str) and item and len(item) <= 120 for item in ids)
+                    or not isinstance(kind, str)
+                    or not isinstance(note, str) or len(note) > 240
+                ):
+                    raise ValueError("Provide valid check IDs and status (queued, acknowledged, or clear).")
+                self._json(HTTPStatus.OK, self.server.state.set_check_dispositions_batch(ids, kind, note=note))
             elif self.path == "/api/fix/batch":
                 if not body.keys() <= {"ids", "include_scripts"}:
                     raise ValueError("Provide valid batch fix parameters.")

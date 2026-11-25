@@ -904,6 +904,31 @@
       </div>
     </div>
   </dialog>
+  <dialog class="dialog green-dialog" id="green-checklist-dialog" aria-labelledby="green-dialog-title">
+    <div class="green-dialog-hero">
+      <div class="green-dialog-badge">Guided path to 100% Green</div>
+      <h2 id="green-dialog-title">Finish remaining checks to reach Green</h2>
+      <p id="green-dialog-subtitle">Use the quick buttons below to open system settings or guides, then check off items as you finish them—or select all to mark them resolved.</p>
+    </div>
+    <div class="green-dialog-body">
+      <div class="green-toolbar">
+        <label class="green-select-all">
+          <input type="checkbox" id="green-select-all">
+          <span id="green-select-all-label">Select all remaining items</span>
+        </label>
+        <span class="green-counter" id="green-selected-counter">0 selected</span>
+      </div>
+      <ul class="green-checklist" id="green-checklist-items"></ul>
+      <p class="dialog-error" id="green-dialog-error" role="status" hidden></p>
+    </div>
+    <div class="green-dialog-footer">
+      <button class="button button-secondary button-small" type="button" id="green-rescan-btn">Re-scan to verify</button>
+      <div class="green-footer-right">
+        <button class="button button-secondary" type="button" id="close-green-dialog">Close</button>
+        <button class="button button-protect" type="button" id="green-mark-fixed-btn" disabled>Mark fixed → Go Green</button>
+      </div>
+    </div>
+  </dialog>
   <dialog class="dialog updates-dialog" id="report-dialog" aria-labelledby="report-title">
     <div class="dialog-body">
       <h2 id="report-title">Report to Wardr</h2>
@@ -925,7 +950,7 @@
   </dialog>
   <dialog class="dialog whats-new-dialog" id="whats-new-dialog" aria-labelledby="whats-new-title">
     <div class="whats-new-head">
-      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.2</span>
+      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.3</span>
       <h2 id="whats-new-title">What’s New in Wardr</h2>
       <p id="whats-new-summary">Security upgrades, new protections, and improvements in this release.</p>
     </div>

@@ -7,6 +7,29 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.3",
+        "date": "2026-11-25",
+        "title": "Guided Fix-All-to-Green Checklist & Unverified Check Resolution",
+        "summary": "Any non-Green scan now pops up a unified Fix All \u2192 Go Green flow that auto-fixes eligible issues first, then opens a guided checklist with direct OS Settings links, how-to guides, individual checkboxes, and Select All to reach 100% Green in one session.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Unified Fix All → Go Green Flow on Every Non-Green Scan",
+                "detail": "Whenever your device is Yellow or Red (including manual or unverified checks), a prominent Fix All → Go Green button appears right on the scan completion modal and Overview hero banner.",
+            },
+            {
+                "tag": "New",
+                "title": "Guided Manual Checklist with Quick OS Settings Links & Select All",
+                "detail": "Auto-fixable issues run automatically first, then any remaining manual or unverified items open in a clean checklist with one-click Windows/macOS Settings shortcuts, official guides, individual checkboxes, and Select All → Mark fixed.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Evidence-Tracked Verification for Unverified Checks",
+                "detail": "Manual and unverified checks can now be confirmed in batch to reach 100% Green, while Wardr automatically re-alerts if the underlying system evidence ever changes on a future scan.",
+            },
+        ],
+    },
+    {
         "version": "0.4.2",
         "date": "2026-11-25",
         "title": "Seamless OAuth Auto-Focus & True One-Click Scan and Fix-to-Green",

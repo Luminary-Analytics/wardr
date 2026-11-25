@@ -149,6 +149,20 @@ _SPECS: dict[str, ActionSpec] = {
         settings_label="Open Remote Desktop",
         settings_uri="ms-settings:remotedesktop",
     ),
+    "windows-uac": ActionSpec(
+        check_id="windows-uac",
+        platforms=("Windows",),
+        settings_label="Open Windows Security",
+        settings_uri="windowsdefender://appbrowser",
+        script_note="Verify User Account Control is enabled in Windows Security or Control Panel → User Accounts.",
+    ),
+    "windows-secure-boot": ActionSpec(
+        check_id="windows-secure-boot",
+        platforms=("Windows",),
+        settings_label="Open Device Security",
+        settings_uri="windowsdefender://devicesecurity",
+        script_note="Check Secure Boot under Windows Security → Device Security (or UEFI/BIOS firmware settings).",
+    ),
     "linux-firewall": ActionSpec(
         check_id="linux-firewall",
         platforms=("Linux",),
