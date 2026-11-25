@@ -90,9 +90,33 @@ footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #d5e0d2;font-size:.
 """
 
 
+def _is_pending_update_id(check_id) -> bool:
+    return isinstance(check_id, str) and check_id.endswith("-pending-updates")
+
+
 def _is_handled(check: dict) -> bool:
+    """Return True for legitimately queued OS updates or manually verified unknown checks."""
     disp = check.get("disposition")
-    return check.get("status") in ("fail", "unknown") and isinstance(disp, dict) and disp.get("kind") in ("queued", "acknowledged")
+    if not isinstance(disp, dict):
+        return False
+    status = check.get("status")
+    kind = disp.get("kind")
+    if status == "unknown" and kind == "acknowledged":
+        return True
+    if status == "fail" and _is_pending_update_id(check.get("id")) and kind == "queued":
+        return True
+    return False
+
+
+def _is_accepted_risk(check: dict) -> bool:
+    """Return True when a failing non-update OS control was acknowledged without actually passing."""
+    disp = check.get("disposition")
+    return (
+        check.get("status") == "fail"
+        and not _is_pending_update_id(check.get("id"))
+        and isinstance(disp, dict)
+        and disp.get("kind") == "acknowledged"
+    )
 
 
 def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats: dict | None = None) -> dict:
@@ -100,11 +124,16 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
     checks = list((scan or {}).get("checks") or [])
     ready = bool((scan or {}).get("scanned_at") or (scan or {}).get("updated_at"))
     outcomes = Counter(check.get("status") for check in checks)
-    unhandled_failures = [check for check in checks if check.get("status") == "fail" and not _is_handled(check)]
-    unhandled_unverified = [check for check in checks if check.get("status") == "unknown" and not _is_handled(check)]
     handled_items = [check for check in checks if _is_handled(check)]
+    accepted_risk_items = [check for check in checks if _is_accepted_risk(check)]
+    unhandled_failures = [
+        check for check in checks
+        if check.get("status") == "fail" and not _is_handled(check) and not _is_accepted_risk(check)
+    ]
+    unhandled_unverified = [check for check in checks if check.get("status") == "unknown" and not _is_handled(check)]
     queued_count = sum(1 for check in handled_items if check["disposition"]["kind"] == "queued")
     acked_count = sum(1 for check in handled_items if check["disposition"]["kind"] == "acknowledged")
+    accepted_risks = len(accepted_risk_items)
     findings = Counter(check.get("severity") for check in unhandled_failures)
     by_severity = {severity: findings[severity] for severity in SEVERITIES}
 
@@ -114,7 +143,7 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
     failed = len(unhandled_failures)
     unverified = len(unhandled_unverified)
     not_applicable = outcomes["not_applicable"]
-    securable_total = secured + handled + failed + unverified
+    securable_total = secured + handled + accepted_risks + failed + unverified
     fixable = sum(1 for check in unhandled_failures if check.get("can_fix") is True)
     coverage_pct = round(100 * addressed / securable_total) if securable_total > 0 else None
 
@@ -144,7 +173,7 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
             f"{urgent} high-impact {'issue needs' if urgent == 1 else 'issues need'} attention."
         )
         as_safe_as_possible = False
-    elif threat_status == "warning" or failed > 0 or unverified > 0 or monitor_running is False:
+    elif threat_status == "warning" or failed > 0 or unverified > 0 or accepted_risks > 0 or monitor_running is False:
         level = "amber"
         label = "Needs attention"
         if threat_status == "warning":
@@ -155,6 +184,14 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
             summary = (
                 f"{addressed} of {securable_total} securable checks are addressed. "
                 f"Resolve {failed} remaining {'item' if failed == 1 else 'items'} to reach maximum protection."
+            )
+        elif accepted_risks > 0:
+            label = "Risk accepted"
+            headline = "Not fully protected — failing checks acknowledged"
+            summary = (
+                f"{secured} of {securable_total} checks verified secure · "
+                f"{accepted_risks} failing {'check' if accepted_risks == 1 else 'checks'} acknowledged as accepted risk — "
+                "fix and re-scan to reach Green Protected."
             )
         elif unverified > 0:
             headline = "Protected — some checks unverified"
@@ -203,6 +240,7 @@ def assess_posture(scan: dict | None, *, monitoring: dict | None = None, threats
         "handled": handled,
         "queued": queued_count,
         "acknowledged": acked_count,
+        "accepted_risks": accepted_risks,
         "addressed": addressed,
         "failed": failed,
         "unverified": unverified,
@@ -320,14 +358,19 @@ def _shield_svg(level: str) -> str:
 def _check_markup(check: dict) -> str:
     status = check.get("status")
     severity = check.get("severity")
-    disp = check.get("disposition") if _is_handled(check) else None
+    handled = _is_handled(check)
+    accepted_risk = _is_accepted_risk(check)
+    disp = check.get("disposition") if (handled or accepted_risk) else None
     if status == "pass":
         item_cls, mark_cls, mark_glyph = "item-pass", "pass", "✓"
         flag_style, label = "pass", "Secured"
-    elif disp is not None:
+    elif handled and disp is not None:
         item_cls, mark_cls, mark_glyph = "item-pass", "pass", "✓"
         flag_style = "pass"
         label = "Queued · Pending restart" if disp["kind"] == "queued" else "Acknowledged"
+    elif accepted_risk and disp is not None:
+        item_cls, mark_cls, mark_glyph = "item-amber", "amber", "!"
+        flag_style, label = "unverified", "Accepted risk (still failing)"
     elif status == "fail":
         is_red = severity in ("critical", "high")
         item_cls = "item-red" if is_red else "item-amber"
@@ -346,11 +389,12 @@ def _check_markup(check: dict) -> str:
     descriptions = []
     if disp is not None:
         note = disp.get("note") or (
-            "Queued to install on next restart." if disp["kind"] == "queued" else "Manually handled / acknowledged by user."
+            "Queued to install on next restart." if disp["kind"] == "queued"
+            else ("Acknowledged as accepted risk (check is still failing on OS)." if accepted_risk else "Manually confirmed by user.")
         )
         descriptions.append(f"<p><strong>Status note:</strong> {escape(str(note))}</p>")
     for label_text, key in (("Risk", "risk"), ("Evidence", "evidence"), ("Next step", "remediation")):
-        if check.get(key) and (label_text == "Evidence" or (status in ("fail", "unknown") and disp is None)):
+        if check.get(key) and (label_text == "Evidence" or (status in ("fail", "unknown") and not handled)):
             descriptions.append(f"<p><strong>{label_text}:</strong> {escape(str(check[key]))}</p>")
     if check.get("verified_at"):
         descriptions.append(f"<p><strong>Rechecked:</strong> {escape(str(check['verified_at']))}</p>")

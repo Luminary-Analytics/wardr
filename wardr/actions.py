@@ -74,10 +74,10 @@ _SPECS: dict[str, ActionSpec] = {
         settings_label="Open Privacy & Security",
         settings_uri="x-apple.systempreferences:com.apple.preference.security?General",
         script_label="Enable Gatekeeper (script)",
-        script_preview="sudo /usr/sbin/spctl --master-enable",
+        script_preview="sudo /usr/sbin/spctl --global-enable || sudo /usr/sbin/spctl --master-enable",
         script_note="Restores macOS Gatekeeper app notarization and signature verification.",
         requires_admin=True,
-        macos_admin_cmd="/usr/sbin/spctl --master-enable",
+        macos_admin_cmd="/usr/sbin/spctl --global-enable 2>/dev/null || /usr/sbin/spctl --master-enable",
     ),
     "macos-sip": ActionSpec(
         check_id="macos-sip",

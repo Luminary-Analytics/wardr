@@ -209,6 +209,76 @@ class PostureAndVisualReportTests(unittest.TestCase):
             restored_upd = next(c for c in restored["checks"] if c["id"] == "macos-pending-updates")
             self.assertNotIn("disposition", restored_upd)
 
+    def test_acknowledging_failing_security_controls_cannot_fake_green_shield(self):
+        from wardr import actions, inventory, pentest
+        import os
+        import stat
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = WardrState(Path(tmp), offline=True)
+            fw_fail = _check("macos-firewall", "Application firewall", "fail", "high")
+            fw_fail["evidence"] = "The macOS application firewall is disabled."
+            gpg_fail = _check("gnupg-directory-permissions", "GnuPG directory permissions", "fail", "medium", can_fix=True)
+            gpg_fail["evidence"] = "The current account's ~/.gnupg directory has POSIX mode 0755."
+            sip_pass = _check("macos-sip", "System Integrity Protection", "pass", "high")
+            state._scan = {
+                "host": state.host["name"],
+                "scanned_at": "2026-11-25T10:00:00+00:00",
+                "checks": [sip_pass, fw_fail, gpg_fail],
+            }
+
+            # 1. Auto-fixable failing checks cannot be acknowledged instead of fixed.
+            with self.assertRaises(ValueError):
+                state.set_check_disposition("gnupg-directory-permissions", "acknowledged")
+            with self.assertRaises(ValueError):
+                state.set_check_dispositions_batch(["gnupg-directory-permissions"], "acknowledged")
+
+            # 2. Non-update checks cannot use 'queued' disposition.
+            with self.assertRaises(ValueError):
+                state.set_check_disposition("macos-firewall", "queued")
+
+            # 3. Acknowledging a failing non-update OS control keeps posture Amber (never Green).
+            state._scan["checks"] = [sip_pass, fw_fail]
+            state.set_check_disposition("macos-firewall", "acknowledged", note="Lab exception")
+            snap = state.enriched_scan_snapshot()
+            posture = assess_posture(snap, monitoring={"running": True}, threats={"status": "clear", "count": 0})
+            self.assertEqual(posture["level"], "amber")
+            self.assertEqual(posture["label"], "Risk accepted")
+            self.assertFalse(posture["as_safe_as_possible"])
+            self.assertEqual(posture["accepted_risks"], 1)
+            self.assertEqual(posture["coverage_pct"], 50)
+            self.assertIn("accepted risk", posture["summary"].lower())
+
+            # Defense matrix also refuses to mark network-intrusion green when firewall is still failing.
+            matrix = pentest.build_defense_matrix(
+                scan=snap,
+                monitoring={"running": True, "poll_count": 1},
+                threats={"status": "clear", "count": 0},
+                exposure_result={"listeners": []},
+                software_result=None,
+                advisories=None,
+                pentest_result=None,
+            )
+            net_domain = next(d for d in matrix["domains"] if d["id"] == "network-intrusion")
+            self.assertNotEqual(net_domain["level"], "green")
+
+            # HTML report labels it honestly as Accepted risk (still failing) in amber hero.
+            markup = html_report(report_data(HOST, snap, monitoring={"running": True}, threats={"status": "clear", "count": 0}))
+            self.assertIn("rag-amber", markup)
+            self.assertIn("Accepted risk (still failing)", markup)
+
+            # 4. Gatekeeper macOS script uses --global-enable with --master-enable fallback.
+            gk = actions.action_guide_for("macos-gatekeeper", system="Darwin")
+            self.assertIsNotNone(gk)
+            self.assertIn("--global-enable", gk["script_preview"])
+
+            # 5. Inventory cache is written with private 0600 permissions on POSIX.
+            inventory.collect_inventory(Path(tmp), include_python=False, force=True)
+            cache_file = Path(tmp) / "inventory-cache.json"
+            self.assertTrue(cache_file.exists())
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(cache_file.stat().st_mode), 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

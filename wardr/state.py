@@ -407,6 +407,10 @@ class WardrState:
                 target = next((item for item in items if item.get("id") == check_id), None)
                 if not target or target.get("status") not in ("fail", "unknown"):
                     raise ValueError("Only an active failing or unverified check from the latest scan can be marked queued or handled.")
+                if target.get("status") == "fail" and target.get("can_fix") is True:
+                    raise ValueError("This check has a safe automatic fix. Apply the fix instead of acknowledging it.")
+                if kind == "queued" and not check_id.endswith("-pending-updates"):
+                    raise ValueError("Only pending OS update checks can be marked queued for restart.")
                 now = datetime.now(timezone.utc)
                 expires_at = (now + timedelta(days=7)).isoformat(timespec="seconds") if kind == "queued" else None
                 entry = {
@@ -441,6 +445,7 @@ class WardrState:
             raise ValueError("Provide between 1 and 64 check IDs.")
         cleaned_note = note.strip()
         updated: list[str] = []
+        skipped_autofix: list[str] = []
         save_copy = None
         with self._lock:
             snapshot = self._scan or {}
@@ -456,7 +461,13 @@ class WardrState:
                     target = by_id.get(raw_id)
                     if not target or target.get("status") not in ("fail", "unknown"):
                         continue
-                    effective_kind = "queued" if (kind == "queued" or (kind == "acknowledged" and raw_id.endswith("-pending-updates"))) else kind
+                    if target.get("status") == "fail" and target.get("can_fix") is True:
+                        skipped_autofix.append(raw_id)
+                        continue
+                    is_update_check = raw_id.endswith("-pending-updates")
+                    if kind == "queued" and not is_update_check:
+                        continue
+                    effective_kind = "queued" if (is_update_check and kind in ("queued", "acknowledged")) else kind
                     expires_at = (now + timedelta(days=7)).isoformat(timespec="seconds") if effective_kind == "queued" else None
                     self._dispositions[raw_id] = {
                         "kind": effective_kind,
@@ -468,9 +479,11 @@ class WardrState:
                     updated.append(raw_id)
             if updated:
                 save_copy = dict(self._dispositions)
+        if not updated and skipped_autofix:
+            raise ValueError("Selected check(s) have automatic fixes — run Fix & Protect instead of acknowledging them.")
         if save_copy is not None:
             save_local_json(self.dispositions_path, {"version": 1, "items": save_copy})
-        return {"ok": True, "updated": updated, "count": len(updated)}
+        return {"ok": True, "updated": updated, "count": len(updated), "skipped_autofix": skipped_autofix}
 
     def status(self) -> dict:
         save_copy = None
@@ -1236,15 +1249,19 @@ class WardrState:
                         local_exp = self._exposure
                     if isinstance(local_exp, dict):
                         surf = surface.audit_exposure(local_exp, probe_local_tls=True)
-                        s_count = len(surf.get("service_findings", [])) + len(surf.get("tls_findings", []))
+                        risky_services = surf.get("risky_services", [])
+                        tls_issues = [item for item in surf.get("local_tls", []) if item.get("status") == "fail"]
+                        s_count = len(risky_services) + len(tls_issues)
                         modules["surface_findings"] = s_count
+                        modules["risky_services"] = len(risky_services)
+                        modules["tls_issues"] = len(tls_issues)
                         self._update_scan_step(
                             "surface",
                             "warn" if s_count else "done",
-                            f"Found {s_count} risky service/TLS issue(s)" if s_count else "No risky exposed local services detected",
+                            f"Found {s_count} risky exposed service/TLS issue(s)" if s_count else "No risky exposed local services detected",
                         )
                     else:
-                        self._update_scan_step("surface", "done", "No exposed risky services detected")
+                        self._update_scan_step("surface", "warn", "Socket tables unavailable for attack-surface audit")
                 except Exception:
                     modules["surface_findings"] = None
                     self._update_scan_step("surface", "warn", "Attack-surface audit incomplete")
@@ -1263,11 +1280,19 @@ class WardrState:
                     matched = sw_result.get("summary", {}).get("matched_findings", 0)
                     modules["packages_discovered"] = pkg_count
                     modules["package_findings"] = matched
-                    self._update_scan_step(
-                        "inventory",
-                        "warn" if matched else "done",
-                        f"Audited {pkg_count} packages · {matched} advisory match(es)",
-                    )
+                    modules["feed_advisories_loaded"] = len(feed_advisories)
+                    if not feed_advisories:
+                        self._update_scan_step(
+                            "inventory",
+                            "done",
+                            f"Cataloged {pkg_count} packages · No OSV/feed advisories loaded yet",
+                        )
+                    else:
+                        self._update_scan_step(
+                            "inventory",
+                            "warn" if matched else "done",
+                            f"Audited {pkg_count} packages against {len(feed_advisories)} advisories · {matched} match(es)",
+                        )
                 except Exception:
                     modules["packages_discovered"] = None
                     self._update_scan_step("inventory", "warn", "Software inventory partially unavailable")

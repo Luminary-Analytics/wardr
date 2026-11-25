@@ -9,6 +9,7 @@ from pathlib import Path
 import platform
 import re
 import stat
+import tempfile
 from urllib.parse import quote
 
 
@@ -278,7 +279,16 @@ def collect_inventory(
     if cache_path is not None:
         try:
             cache_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            cache_path.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            descriptor, tmp_name = tempfile.mkstemp(dir=cache_path.parent, prefix=".inv-", suffix=".json")
+            tmp_path = Path(tmp_name)
+            try:
+                if os.name == "posix":
+                    os.fchmod(descriptor, 0o600)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    json.dump(result, handle, ensure_ascii=False)
+                tmp_path.replace(cache_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
         except OSError:
             pass
     return result

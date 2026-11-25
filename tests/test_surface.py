@@ -32,6 +32,68 @@ class SurfaceAndBaselineDriftTests(unittest.TestCase):
         self.assertIn("surface/surface-port-6379", task_ids)
         self.assertIn("surface/surface-port-11434", task_ids)
 
+    def test_surface_audit_flags_exposed_vnc_rdp_and_smb(self):
+        exposure = {
+            "state": "complete",
+            "listeners": [
+                {"protocol": "tcp", "address": "*", "port": 5900, "scope": "wildcard", "process": "launchd"},
+                {"protocol": "tcp", "address": "0.0.0.0", "port": 3389, "scope": "wildcard", "process": "svchost"},
+                {"protocol": "tcp", "address": "0.0.0.0", "port": 445, "scope": "wildcard", "process": "smbd"},
+                {"protocol": "tcp", "address": "127.0.0.1", "port": 5900, "scope": "loopback", "process": "vnc"},
+            ],
+        }
+        result = surface.audit_exposure(exposure, probe_local_tls=False)
+        ports = {item["port"]: item["severity"] for item in result["risky_services"]}
+        self.assertEqual(ports, {5900: "high", 3389: "high", 445: "medium"})
+
+    def test_heavy_scan_counts_risky_services_and_flags_unloaded_advisories(self):
+        from wardr import checks, exposure as exp_mod, feeds, fim, inventory
+        from wardr.state import WardrState
+
+        fake_scan = {
+            "platform": "macOS",
+            "os_version": "26.5.1",
+            "host": "test-host",
+            "scanned_at": "2026-11-25T12:00:00+00:00",
+            "checks": [
+                {"id": "macos-firewall", "title": "Application firewall", "category": "Network", "severity": "medium", "status": "pass", "evidence": "enabled", "risk": "", "remediation": "", "can_fix": False, "references": []},
+            ],
+        }
+        fake_exposure = {
+            "state": "complete",
+            "listeners": [
+                {"protocol": "tcp", "address": "*", "port": 11434, "scope": "wildcard", "process": "ollama"},
+                {"protocol": "tcp", "address": "*", "port": 5900, "scope": "wildcard", "process": "launchd"},
+            ],
+        }
+        fake_inv = {
+            "collected_at": "2026-11-25T12:00:00+00:00",
+            "cached": False,
+            "component_count": 42,
+            "sources": ["homebrew (42)"],
+            "sbom": {"bomFormat": "CycloneDX", "specVersion": "1.5", "components": []},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            state = WardrState(Path(tmp), offline=True)
+            with (
+                patch.object(checks, "scan", return_value=fake_scan),
+                patch.object(exp_mod, "collect_exposure", return_value=fake_exposure),
+                patch.object(fim, "check_integrity", return_value={"status": "pass", "tracked_count": 3, "changes": []}),
+                patch.object(inventory, "collect_inventory", return_value=fake_inv),
+                patch.object(feeds, "load_feed_advisories", return_value=[]),
+            ):
+                state._run_scan("heavy")
+            st = state.status()
+            modules = st["scan"]["modules"]
+            self.assertEqual(modules["surface_findings"], 2)
+            self.assertEqual(modules["risky_services"], 2)
+            self.assertEqual(modules["tls_issues"], 0)
+            self.assertEqual(modules["feed_advisories_loaded"], 0)
+            steps = {s["id"]: s for s in st["scan"]["steps"]}
+            self.assertEqual(steps["surface"]["status"], "warn")
+            self.assertIn("2 risky exposed", steps["surface"]["detail"])
+            self.assertIn("No OSV/feed advisories loaded", steps["inventory"]["detail"])
+
     def test_service_templates_generate_hardened_configs(self):
         systemd = service.render_template("systemd", state_dir="/var/lib/wardr", interval=15)
         self.assertIn("NoNewPrivileges=yes", systemd)

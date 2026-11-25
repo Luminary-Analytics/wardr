@@ -7,6 +7,29 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.5",
+        "date": "2026-11-25",
+        "title": "Verified Green Shield Hardening, Heavy Scan Surface Fix & Expanded Exposure Detection",
+        "summary": "Hardened Green Shield verification so failing OS controls can never be rubber-stamped green without a live OS re-scan, fixed Heavy Scan's attack-surface reporting, added exposed VNC/RDP/SMB detection, and updated macOS Gatekeeper repair for macOS 15+.",
+        "highlights": [
+            {
+                "tag": "Security",
+                "title": "Zero False-Green Verification for Failing OS Controls",
+                "detail": "Auto-fixable failures must be fixed rather than acknowledged, the Guided Checklist runs a live OS re-scan to verify fixed controls before clearing them, and acknowledged failing OS controls keep posture Amber ('Risk accepted') until resolved.",
+            },
+            {
+                "tag": "Fixed",
+                "title": "Heavy Scan Attack-Surface & Advisory Feed Reporting",
+                "detail": "Fixed a key mismatch in Heavy Scan that under-counted exposed risky services and local TLS issues, and clarified Software Inventory reporting when no OSV/feed advisories have been loaded yet.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Exposed VNC / Screen Sharing, RDP & SMB Detection + macOS 15+ Gatekeeper Fix",
+                "detail": "Attack-surface audits now flag wildcard-exposed VNC (:5900), RDP (:3389), and SMB (:445), macOS Gatekeeper repair uses `spctl --global-enable` with fallback, and `inventory-cache.json` is written atomically with `0600` permissions.",
+            },
+        ],
+    },
+    {
         "version": "0.4.4",
         "date": "2026-11-25",
         "title": "Default Dark Mode, Guided Fix-All-to-Green Checklist & Unverified Check Resolution",

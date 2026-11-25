@@ -333,14 +333,24 @@ function statusBadge(label, tone) {
   return badge;
 }
 
+function isPendingUpdateCheck(check) {
+  return String(check?.id || "").endsWith("-pending-updates");
+}
+
 function isHandledCheck(check) {
   const kind = check?.disposition?.kind;
-  return (check?.status === "fail" || check?.status === "unknown") && (kind === "queued" || kind === "acknowledged");
+  if (check?.status === "unknown" && kind === "acknowledged") return true;
+  if (check?.status === "fail" && isPendingUpdateCheck(check) && kind === "queued") return true;
+  return false;
+}
+
+function isAcceptedRiskCheck(check) {
+  return check?.status === "fail" && !isPendingUpdateCheck(check) && check?.disposition?.kind === "acknowledged";
 }
 
 function openActionableChecks(scan) {
   return sortedChecks(scan?.checks || []).filter(
-    (c) => (c.status === "fail" || c.status === "unknown") && !isHandledCheck(c),
+    (c) => (c.status === "fail" || c.status === "unknown") && !isHandledCheck(c) && !isAcceptedRiskCheck(c),
   );
 }
 
@@ -349,7 +359,7 @@ function isUpdateCheck(check) {
 }
 
 function dispositionMeta(check) {
-  if (isUpdateCheck(check)) {
+  if (isPendingUpdateCheck(check)) {
     return {
       kind: "queued",
       shortLabel: "Mark queued",
@@ -361,15 +371,15 @@ function dispositionMeta(check) {
     return {
       kind: "acknowledged",
       shortLabel: "Mark verified",
-      actionLabel: "Mark verified / fixed",
+      actionLabel: "Mark verified manually",
       badgeLabel: "Verified manually",
     };
   }
   return {
     kind: "acknowledged",
-    shortLabel: "Mark handled",
-    actionLabel: "Mark manually fixed / handled",
-    badgeLabel: "Acknowledged",
+    shortLabel: "Accept risk",
+    actionLabel: "Acknowledge as accepted risk",
+    badgeLabel: "Accepted risk",
   };
 }
 
@@ -377,7 +387,10 @@ function checkStatus(check) {
   if (isHandledCheck(check)) {
     return check.disposition.kind === "queued"
       ? ["Queued · Pending restart", "queued"]
-      : ["Acknowledged", "queued"];
+      : ["Verified manually", "queued"];
+  }
+  if (isAcceptedRiskCheck(check)) {
+    return ["Accepted risk", "medium"];
   }
   if (check.status === "fail") {
     const severity = severities.includes(check.severity) ? check.severity : "unknown";
@@ -390,6 +403,7 @@ function checkStatus(check) {
 
 function checkVisual(check) {
   if (check.status === "pass" || isHandledCheck(check)) return ["pass", "✓"];
+  if (isAcceptedRiskCheck(check)) return ["amber", "!"];
   if (check.status === "fail") {
     return check.severity === "critical" || check.severity === "high" ? ["red", "!"] : ["amber", "!"];
   }
@@ -446,9 +460,11 @@ function findingCard(check, open) {
   if (subParts.length) heading.append(make("span", "finding-category", subParts.join(" · ")));
 
   const handled = isHandledCheck(check);
+  const acceptedRisk = isAcceptedRiskCheck(check);
+  const hasDisposition = handled || acceptedRisk;
   const dispMeta = dispositionMeta(check);
   const right = make("span", "finding-summary-right");
-  if (handled) {
+  if (hasDisposition) {
     const undoBtn = make("button", "button button-secondary button-small button-undo-disp", "Undo");
     undoBtn.type = "button";
     undoBtn.dataset.disposition = check.id;
@@ -506,13 +522,16 @@ function findingCard(check, open) {
   summary.append(glyph, heading, right);
 
   const body = make("div", "finding-body");
-  if (handled) {
+  if (hasDisposition) {
     const markedAt = humanDate(check.disposition.at);
     const statusText = check.disposition.kind === "queued"
       ? "Marked queued (pending restart)" + (markedAt ? " on " + markedAt : "")
         + ". Wardr counts this item as addressed until your restart completes, and will automatically re-verify on future scans or re-alert immediately if a newer update appears."
-      : "Marked manually fixed / acknowledged" + (markedAt ? " on " + markedAt : "")
-        + ". Wardr will automatically re-alert if a future scan detects new or changed evidence.";
+      : acceptedRisk
+        ? "Acknowledged as accepted risk" + (markedAt ? " on " + markedAt : "")
+          + ". This security control is still failing on your OS, so device posture stays Amber until you fix it and re-scan."
+        : "Confirmed manually" + (markedAt ? " on " + markedAt : "")
+          + ". Wardr will automatically re-alert if a future scan detects new or changed evidence.";
     body.append(detailBlock("Status", statusText));
   }
   if (check.risk && check.status === "fail" && !handled) body.append(detailBlock("Risk", check.risk));
@@ -522,7 +541,7 @@ function findingCard(check, open) {
   if (references) body.append(references);
 
   const actions = make("div", "finding-actions");
-  if (handled) {
+  if (hasDisposition) {
     const restoreBtn = make("button", "button button-secondary button-small", "Restore to Needs action");
     restoreBtn.type = "button";
     restoreBtn.dataset.disposition = check.id;
@@ -548,25 +567,18 @@ function findingCard(check, open) {
       scBtn.addEventListener("click", () => promptScriptFixes([check]));
       actions.append(scBtn);
     }
-    if (check.status === "fail" || check.status === "unknown") {
+    if ((check.status === "fail" && check.can_fix !== true) || check.status === "unknown") {
       const ackBtn = make("button", "button button-ack button-small", dispMeta.actionLabel);
       ackBtn.type = "button";
       ackBtn.dataset.disposition = check.id;
       ackBtn.addEventListener("click", () => setCheckDisposition(check.id, dispMeta.kind));
       actions.append(ackBtn);
-      if (dispMeta.kind === "queued") {
-        const manualBtn = make("button", "button button-secondary button-small", "Mark manually fixed");
-        manualBtn.type = "button";
-        manualBtn.dataset.disposition = check.id;
-        manualBtn.addEventListener("click", () => setCheckDisposition(check.id, "acknowledged"));
-        actions.append(manualBtn);
-      }
-      if (check.status === "fail") {
-        const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
-        reportBtn.type = "button";
-        reportBtn.addEventListener("click", () => openIssueReport("finding", check.id));
-        actions.append(reportBtn);
-      }
+    }
+    if (check.status === "fail") {
+      const reportBtn = make("button", "button button-secondary button-small", "Report to Wardr");
+      reportBtn.type = "button";
+      reportBtn.addEventListener("click", () => openIssueReport("finding", check.id));
+      actions.append(reportBtn);
     }
   }
   if (actions.childElementCount) body.append(actions);
@@ -1971,13 +1983,13 @@ function renderGreenChecklistModal() {
   const applyBtn = element("green-mark-fixed-btn");
   applyBtn.disabled = state.pendingGreenApply || selectedCount === 0;
   if (state.pendingGreenApply) {
-    setText("green-mark-fixed-btn", "Updating…");
+    setText("green-mark-fixed-btn", "Verifying…");
   } else if (selectedCount === items.length && selectedCount > 0) {
-    setText("green-mark-fixed-btn", "Mark all fixed → Go Green");
+    setText("green-mark-fixed-btn", "Verify all → Go Green");
   } else if (selectedCount > 0) {
-    setText("green-mark-fixed-btn", "Mark " + numberFormat.format(selectedCount) + " fixed");
+    setText("green-mark-fixed-btn", "Verify " + numberFormat.format(selectedCount) + " selected");
   } else {
-    setText("green-mark-fixed-btn", "Mark fixed → Go Green");
+    setText("green-mark-fixed-btn", "Verify & Confirm");
   }
 
   list.replaceChildren(...items.map((check) => {
@@ -2062,27 +2074,63 @@ function openGreenChecklistModal() {
 async function applyGreenChecklistSelection() {
   const ids = Array.from(state.greenSelectedIds);
   if (!ids.length || state.pendingGreenApply) return;
+  const currentChecks = state.data?.scan?.checks || [];
+  const byId = new Map(currentChecks.map((c) => [c.id, c]));
+  const verifiableFailIds = [];
+  const dispositionIds = [];
+  for (const id of ids) {
+    const check = byId.get(id);
+    if (!check) continue;
+    if (check.status === "fail" && !isPendingUpdateCheck(check)) {
+      verifiableFailIds.push(id);
+    } else if (check.status === "unknown" || isPendingUpdateCheck(check)) {
+      dispositionIds.push(id);
+    }
+  }
   state.pendingGreenApply = true;
   element("green-dialog-error").hidden = true;
   renderGreenChecklistModal();
   try {
-    await request("/api/check/disposition/batch", {
-      ids,
-      kind: "acknowledged",
-      note: "Verified or fixed via Wardr Get-to-Green checklist.",
-    });
-    state.greenSelectedIds.clear();
-    await refreshAfterAction();
+    if (dispositionIds.length > 0) {
+      await request("/api/check/disposition/batch", {
+        ids: dispositionIds,
+        kind: "acknowledged",
+        note: "Confirmed or queued via Wardr Guided Checklist.",
+      });
+    }
+    let stillFailing = [];
+    if (verifiableFailIds.length > 0) {
+      await request("/api/scan", { profile: "light" });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        await refreshAfterAction();
+        if (state.data?.scan?.state !== "running") break;
+      }
+      const updatedById = new Map((state.data?.scan?.checks || []).map((c) => [c.id, c]));
+      stillFailing = verifiableFailIds.filter((id) => updatedById.get(id)?.status === "fail");
+    } else {
+      await refreshAfterAction();
+    }
+    state.greenSelectedIds = new Set(stillFailing);
     const remaining = openActionableChecks(state.data?.scan);
-    if (remaining.length === 0) {
+    if (stillFailing.length > 0) {
+      setText(
+        "green-dialog-error",
+        "Wardr re-scanned your OS and confirmed "
+          + plural(stillFailing.length, "item")
+          + " still failing. Complete the change in System Settings, then click Re-scan to verify.",
+      );
+      element("green-dialog-error").hidden = false;
+      renderGreenChecklistModal();
+    } else if (remaining.length === 0) {
       if (element("green-checklist-dialog").open) element("green-checklist-dialog").close();
-      state.actionNotice = { error: false, text: "All remaining items marked resolved — your device is now 100% Green Protected!" };
+      state.actionNotice = { error: false, text: "All checks verified secure or queued — your device is now Green Protected!" };
       renderNotice();
     } else {
       renderGreenChecklistModal();
     }
   } catch (error) {
-    setText("green-dialog-error", errorText(error, "Could not update selected checks."));
+    setText("green-dialog-error", errorText(error, "Could not verify selected checks."));
     element("green-dialog-error").hidden = false;
   } finally {
     state.pendingGreenApply = false;
