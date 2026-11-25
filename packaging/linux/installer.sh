@@ -42,5 +42,10 @@ tar -xzf "$work/payload.tar.gz" -C "$work"
 
 install_root=$data_home/wardr
 "$work/python/bin/python3" -I "$work/install.py" --install-dir "$install_root"
+if [ -f "$work/wardr-desktop" ]; then
+    cp "$work/wardr-desktop" "$install_root/wardr-desktop.tmp"
+    chmod 0755 "$install_root/wardr-desktop.tmp"
+    mv -f "$install_root/wardr-desktop.tmp" "$install_root/wardr-desktop"
+fi
 "$install_root/venv/bin/python" -I "$work/desktop.py" ${desktop:+"$desktop"}
 exit 0

@@ -45,6 +45,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          cargo build --release --locked --manifest-path desktop/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Cargo build for Wardr desktop exited $LASTEXITCODE." }
+          $desktopExe = (Resolve-Path desktop/target/release/wardr-desktop.exe).Path
           $tool = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
           $inno = Join-Path $env:RUNNER_TEMP 'inno-compiler'
           Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $tool
@@ -55,7 +58,7 @@ jobs:
           if ($installed.ExitCode -ne 0) { throw "Inno Setup installation exited $($installed.ExitCode)." }
           $payload = (Resolve-Path native-payload).Path
           $output = (New-Item -ItemType Directory -Path native-dist).FullName
-          & (Join-Path $inno 'ISCC.exe') "/DWardrVersion=$env:WARDR_VERSION" "/DWardrPayload=$payload" "/DWardrArch=$env:WARDR_ARCH" "/O$output" packaging/windows/wardr.iss
+          & (Join-Path $inno 'ISCC.exe') "/DWardrVersion=$env:WARDR_VERSION" "/DWardrPayload=$payload" "/DWardrDesktopExe=$desktopExe" "/DWardrArch=$env:WARDR_ARCH" "/O$output" packaging/windows/wardr.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compiler exited $LASTEXITCODE." }
           $setup = (Get-ChildItem native-dist -Filter '*.exe').FullName
           $location = Join-Path $env:RUNNER_TEMP 'Wardr Runtime Test'
@@ -64,6 +67,10 @@ jobs:
           if ($result.ExitCode -ne 0) {
             Get-Content $log -Tail 75
             throw "Wardr setup exited $($result.ExitCode)."
+          }
+          $installedApp = Join-Path $location 'Wardr.exe'
+          if (-not (Test-Path -LiteralPath $installedApp -PathType Leaf)) {
+            throw "Wardr setup did not install the native desktop app at $installedApp."
           }
           $python = Join-Path $location 'venv\Scripts\python.exe'
           & $python -I -m wardr --state-dir (Join-Path $env:RUNNER_TEMP 'verify-updates') update --check
@@ -89,9 +96,12 @@ jobs:
         if: matrix.platform == 'linux'
         shell: bash
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev
           python packaging/linux/build.py --payload native-payload --arch "$WARDR_ARCH" --output native-dist
           export XDG_DATA_HOME="$RUNNER_TEMP/wardr-data"
           sh "native-dist/wardr-$WARDR_VERSION-linux-$WARDR_ARCH.run" --no-desktop
+          test -x "$XDG_DATA_HOME/wardr/wardr-desktop"
           python_path="$XDG_DATA_HOME/wardr/venv/bin/python"
           "$python_path" -I -m wardr --state-dir "$RUNNER_TEMP/verify-updates" update --check
           echo "WARDR_INSTALLED_PYTHON=$python_path" >> "$GITHUB_ENV"

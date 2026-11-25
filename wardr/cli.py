@@ -204,6 +204,9 @@ def _collect_plan(directory: Path) -> dict:
     return build_plan(host_info(), scan, local_exposure, events, software)
 
 
+DESKTOP_RESTART_EXIT_CODE = 75
+
+
 def _relaunch_dashboard(arguments: list[str]) -> int:
     executable = os.path.abspath(sys.executable)
     command = [executable, "-I", "-m", "wardr", *arguments]
@@ -230,6 +233,8 @@ def _serve_dashboard(directory: Path, args, arguments: list[str], windows_launch
     outcome = serve(state, args.port if explicit else 0, open_browser, explicit and args.auto_advisories,
                     update_blocker=update_blocker)
     if outcome is RESTART_DASHBOARD:
+        if os.environ.get("WARDR_DESKTOP_SHELL") == "1":
+            return DESKTOP_RESTART_EXIT_CODE
         return _relaunch_dashboard(arguments)
     return 0
 

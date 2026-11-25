@@ -53,7 +53,11 @@ Choose either **Render** (same platform as `getwardr.com`) using `deploy/threat-
 
 ## 5. SSO Sign-In Configuration for Packaged Builds
 - **Microsoft SSO:** Public PKCE (`S256`) Entra client ID (`d88b005f-fc08-40cd-8037-873321f31433`) is built into `wardr/account.py` — works out of the box with zero secrets.
-- **Google SSO:** For public desktop builds, either configure a hosted OAuth broker (`WARDR_AUTH_BROKER_URL`) on `api.getwardr.com` (recommended so no client secret ships in desktop binaries) or supply `WARDR_GOOGLE_CLIENT_ID` / `WARDR_GOOGLE_CLIENT_SECRET` via environment / `sso-config.json`.
+- **Google SSO (Stateless PKCE OAuth Broker on `api.getwardr.com`):**
+  1. In Google Cloud Console → **APIs & Services → Credentials**, create an **OAuth 2.0 Client ID** of type **Web application**.
+  2. Add Authorized redirect URI: `https://api.getwardr.com/oauth/google/callback`.
+  3. In Render (`wardr-threat-network` → **Environment**), set `WARDR_PUBLIC_URL=https://api.getwardr.com`, `WARDR_GOOGLE_CLIENT_ID`, and `WARDR_GOOGLE_CLIENT_SECRET`.
+  4. Verify `curl -sS https://api.getwardr.com/oauth/providers` returns `{"providers": {"google": true, ...}}`. Desktop installs discover this automatically and enable **Continue with Google** with zero secrets shipped in client binaries.
 
 ## Automated Feedback → Release Loop (`v0.4.0` → `v0.4.1+`)
 1. **One-time secret setup for automated daily GitHub triage:**

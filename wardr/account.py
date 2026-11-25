@@ -217,6 +217,7 @@ class AccountManager:
         self.telemetry_log_path = self.state_dir / _TELEMETRY_LOG_FILE
         self._lock = threading.Lock()
         self._pending_oauth: dict[str, dict] = {}
+        self._broker_providers: dict[str, bool] = {}
         self._session: dict | None = self._load_session()
         self._sso_config: dict = self._load_sso_config()
 
@@ -263,18 +264,63 @@ class AccountManager:
             return cfg.get("microsoft_client_id", "").strip(), cfg.get("microsoft_client_secret", "").strip()
         return "", ""
 
+    def _resolve_broker_url(self) -> tuple[str, bool]:
+        env_raw = os.environ.get("WARDR_AUTH_BROKER_URL")
+        if env_raw is not None:
+            cleaned = env_raw.strip().rstrip("/")
+            if cleaned.lower() in ("", "off", "none", "false", "0"):
+                return "", False
+            return cleaned, True
+        with self._lock:
+            server_url = str(self._sso_config.get("server_url") or _DEFAULT_CLOUD_URL).strip().rstrip("/")
+        return server_url, False
+
+    def refresh_broker_providers(self) -> dict[str, bool]:
+        """Discover which OAuth providers are enabled on the hosted Wardr auth broker."""
+        if self.offline:
+            return {}
+        broker_url, _ = self._resolve_broker_url()
+        if not broker_url:
+            return {}
+        try:
+            validated = _validate_server_url(broker_url)
+            status_code, payload = _https_request(f"{validated}/oauth/providers", method="GET")
+            if status_code == 200 and isinstance(payload.get("providers"), dict):
+                discovered = {
+                    pid: bool(payload["providers"].get(pid))
+                    for pid in SSO_PROVIDERS
+                }
+                with self._lock:
+                    self._broker_providers = discovered
+                return dict(discovered)
+        except (AccountError, ValueError):
+            pass
+        return {}
+
+    def refresh_broker_providers_async(self) -> None:
+        if self.offline:
+            return
+        threading.Thread(
+            target=self.refresh_broker_providers,
+            name="wardr-oauth-discovery",
+            daemon=True,
+        ).start()
+
     def status(self) -> dict:
         with self._lock:
             session = dict(self._session) if isinstance(self._session, dict) else None
             cfg = dict(self._sso_config)
+            broker_providers = dict(self._broker_providers)
         signed_in = session is not None
+        broker_url, explicit_broker = self._resolve_broker_url()
         providers = []
         for pid, spec in SSO_PROVIDERS.items():
             cid, _ = self._provider_credentials(pid)
+            via_broker = bool(broker_url) and (explicit_broker or bool(broker_providers.get(pid)))
             providers.append({
                 "id": pid,
                 "label": spec["label"],
-                "configured": bool(cid),
+                "configured": bool(cid or via_broker),
             })
         return {
             "signed_in": signed_in,
@@ -407,13 +453,16 @@ class AccountManager:
         if not accepted_legal:
             raise ValueError("Please review and accept the Privacy Policy and Terms of Use before continuing.")
         client_id, _ = self._provider_credentials(provider_id)
-        broker_url = os.environ.get("WARDR_AUTH_BROKER_URL", "").strip().rstrip("/")
-        if not client_id and not broker_url:
+        broker_url, explicit_broker = self._resolve_broker_url()
+        with self._lock:
+            broker_enabled = bool(self._broker_providers.get(provider_id))
+        use_broker = (not client_id) and bool(broker_url) and (explicit_broker or broker_enabled)
+        if not client_id and not use_broker:
             raise AccountError(
-                f"{spec['label']} sign-in is not linked on this local development build yet "
-                f"(configure {spec['env_client_id']} or WARDR_AUTH_BROKER_URL for Wardr Cloud auth). "
-                "You can create or sign in with an Email & Password account below."
+                f"{spec['label']} sign-in is not enabled on this installation yet. "
+                "Use Microsoft sign-in or create an Email & Password account below."
             )
+        validated_broker = _validate_server_url(broker_url) if use_broker else ""
         state_token = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(24)
         verifier = secrets.token_urlsafe(64)
@@ -427,12 +476,14 @@ class AccountManager:
             }
             self._pending_oauth[state_token] = {
                 "provider": provider_id,
+                "mode": "broker" if use_broker else "direct",
+                "broker_url": validated_broker,
                 "verifier": verifier,
                 "nonce": nonce,
                 "callback_url": callback_url,
                 "created_at": now,
             }
-        if broker_url and not client_id:
+        if use_broker:
             broker_params = {
                 "redirect_uri": callback_url,
                 "state": state_token,
@@ -443,7 +494,7 @@ class AccountManager:
             return {
                 "ok": True,
                 "provider": provider_id,
-                "authorize_url": f"{_validate_server_url(broker_url)}/oauth/{provider_id}?{urlencode(broker_params)}",
+                "authorize_url": f"{validated_broker}/oauth/{provider_id}?{urlencode(broker_params)}",
             }
         params = {
             "client_id": client_id,
@@ -477,57 +528,88 @@ class AccountManager:
 
         provider_id = pending["provider"]
         spec = SSO_PROVIDERS[provider_id]
-        client_id, client_secret = self._provider_credentials(provider_id)
-        if not client_id:
-            raise AccountError(f"{spec['label']} SSO client ID is no longer configured.")
 
-        form = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": pending["callback_url"],
-            "client_id": client_id,
-            "code_verifier": pending["verifier"],
-        }
-        if client_secret:
-            form["client_secret"] = client_secret
-
-        status_code, token_data = _https_request(
-            spec["token_url"],
-            method="POST",
-            body=urlencode(form).encode("utf-8"),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        access_token = token_data.get("access_token") if status_code == 200 else None
-        id_claims = _decode_jwt_claims(str(token_data.get("id_token") or "")) if status_code == 200 else {}
-        if id_claims and id_claims.get("nonce") and not hmac.compare_digest(str(id_claims["nonce"]), pending["nonce"]):
-            raise AccountError(f"{spec['label']} ID token nonce verification failed.")
-        if not isinstance(access_token, str) or not access_token:
-            err_desc = str(token_data.get("error_description") or token_data.get("error") or "").strip()
-            suffix = f": {err_desc[:120]}" if err_desc else ""
-            raise AccountError(f"{spec['label']} did not complete the OAuth token exchange (HTTP {status_code}{suffix}).")
-
-        profile: dict = {}
-        ui_status = 0
-        try:
-            ui_status, profile = _https_request(
-                spec["userinfo_url"],
-                method="GET",
-                headers={"Authorization": f"Bearer {access_token}"},
+        if pending.get("mode") == "broker":
+            broker_url = str(pending.get("broker_url") or "")
+            if not broker_url:
+                raise AccountError("Wardr auth broker URL is missing for this sign-in session.")
+            exchange_body = json.dumps({
+                "grant_type": "authorization_code",
+                "provider": provider_id,
+                "code": code,
+                "code_verifier": pending["verifier"],
+                "redirect_uri": pending["callback_url"],
+            }, ensure_ascii=True).encode("utf-8")
+            status_code, broker_data = _https_request(
+                f"{_validate_server_url(broker_url)}/oauth/token",
+                method="POST",
+                body=exchange_body,
+                headers={"Content-Type": "application/json"},
             )
-        except AccountError:
-            profile = {}
-        email = str(
-            profile.get("email")
-            or profile.get("preferred_username")
-            or id_claims.get("email")
-            or id_claims.get("preferred_username")
-            or id_claims.get("upn")
-            or ""
-        ).strip().lower()
-        if not _EMAIL_RE.match(email):
-            raise AccountError(f"Could not verify email identity from {spec['label']} (HTTP {ui_status}).")
-        display_name = str(profile.get("name") or id_claims.get("name") or email.split("@")[0])[:80]
-        sub = str(profile.get("sub") or id_claims.get("sub") or secrets.token_hex(12))
+            if status_code != 200 or broker_data.get("ok") is not True:
+                err_msg = str(broker_data.get("error") or "").strip()
+                suffix = f": {err_msg[:120]}" if err_msg else ""
+                raise AccountError(f"{spec['label']} sign-in verification failed (HTTP {status_code}{suffix}).")
+            returned_nonce = str(broker_data.get("nonce") or "")
+            if not returned_nonce or not hmac.compare_digest(returned_nonce, pending["nonce"]):
+                raise AccountError(f"{spec['label']} sign-in nonce verification failed.")
+            email = str(broker_data.get("email") or "").strip().lower()
+            if not _EMAIL_RE.match(email):
+                raise AccountError(f"Could not verify email identity from {spec['label']}.")
+            display_name = str(broker_data.get("name") or email.split("@")[0])[:80]
+            sub = str(broker_data.get("sub") or secrets.token_hex(12))
+        else:
+            client_id, client_secret = self._provider_credentials(provider_id)
+            if not client_id:
+                raise AccountError(f"{spec['label']} SSO client ID is no longer configured.")
+
+            form = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": pending["callback_url"],
+                "client_id": client_id,
+                "code_verifier": pending["verifier"],
+            }
+            if client_secret:
+                form["client_secret"] = client_secret
+
+            status_code, token_data = _https_request(
+                spec["token_url"],
+                method="POST",
+                body=urlencode(form).encode("utf-8"),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            access_token = token_data.get("access_token") if status_code == 200 else None
+            id_claims = _decode_jwt_claims(str(token_data.get("id_token") or "")) if status_code == 200 else {}
+            if id_claims and id_claims.get("nonce") and not hmac.compare_digest(str(id_claims["nonce"]), pending["nonce"]):
+                raise AccountError(f"{spec['label']} ID token nonce verification failed.")
+            if not isinstance(access_token, str) or not access_token:
+                err_desc = str(token_data.get("error_description") or token_data.get("error") or "").strip()
+                suffix = f": {err_desc[:120]}" if err_desc else ""
+                raise AccountError(f"{spec['label']} did not complete the OAuth token exchange (HTTP {status_code}{suffix}).")
+
+            profile: dict = {}
+            ui_status = 0
+            try:
+                ui_status, profile = _https_request(
+                    spec["userinfo_url"],
+                    method="GET",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            except AccountError:
+                profile = {}
+            email = str(
+                profile.get("email")
+                or profile.get("preferred_username")
+                or id_claims.get("email")
+                or id_claims.get("preferred_username")
+                or id_claims.get("upn")
+                or ""
+            ).strip().lower()
+            if not _EMAIL_RE.match(email):
+                raise AccountError(f"Could not verify email identity from {spec['label']} (HTTP {ui_status}).")
+            display_name = str(profile.get("name") or id_claims.get("name") or email.split("@")[0])[:80]
+            sub = str(profile.get("sub") or id_claims.get("sub") or secrets.token_hex(12))
         account_id = f"sso_{provider_id}_{hashlib.sha256(sub.encode('utf-8')).hexdigest()[:16]}"
         now = _utc_now()
         with self._lock:

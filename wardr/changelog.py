@@ -7,6 +7,34 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.1",
+        "date": "2026-11-25",
+        "title": "Native Desktop Apps, System Tray & Stateless Google Sign-In",
+        "summary": "Wardr now runs as a true native desktop application on Windows, macOS, and Linux with no console window, system tray background monitoring, redesigned sign-in consent UX, and stateless PKCE Google Sign-In.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Native Desktop Apps for Windows, macOS & Linux",
+                "detail": "Wardr now launches in its own lightweight native window (Edge WebView2 on Windows, WKWebView on macOS, WebKitGTK on Linux) with zero console or CMD prompt windows.",
+            },
+            {
+                "tag": "New",
+                "title": "System Tray & Menu Bar Background Monitoring",
+                "detail": "Closing the Wardr window keeps continuous security scanning active in your system tray or menu bar, with single-instance focus and seamless in-place update restarts.",
+            },
+            {
+                "tag": "New",
+                "title": "Stateless PKCE Google Sign-In (Zero Client Secrets)",
+                "detail": "Added a zero-retention PKCE S256 OAuth broker on api.getwardr.com so Continue with Google works cleanly without embedding any OAuth secrets in desktop binaries.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Clearer Sign-In Consent & Scrollable Account Modal",
+                "detail": "Moved the required Privacy Policy & Terms checkbox above the sign-in buttons, clearly separated optional telemetry toggles, and fixed modal clipping on smaller screens.",
+            },
+        ],
+    },
+    {
         "version": "0.4.0",
         "date": "2026-11-22",
         "title": "Purple-Team Self-Pen-Test, Supply-Chain Scanner, Accounts & Hardened Telemetry",

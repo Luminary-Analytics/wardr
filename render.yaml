@@ -11,6 +11,12 @@ services:
     envVars:
       - key: WARDR_ADMIN_TOKEN
         generateValue: true
+      - key: WARDR_PUBLIC_URL
+        value: https://api.getwardr.com
+      - key: WARDR_GOOGLE_CLIENT_ID
+        sync: false
+      - key: WARDR_GOOGLE_CLIENT_SECRET
+        sync: false
     disk:
       name: wardr-data
       mountPath: /data

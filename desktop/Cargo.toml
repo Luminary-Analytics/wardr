@@ -1,0 +1,31 @@
+[package]
+name = "wardr-desktop"
+version = "0.4.1"
+edition = "2021"
+description = "Native desktop application shell for Wardr."
+license = "MIT"
+
+[[bin]]
+name = "wardr-desktop"
+path = "src/main.rs"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+muda = "0.17"
+open = "5"
+rfd = "0.15"
+tao = "0.34"
+tray-icon = "0.21"
+wry = { version = "0.53", default-features = false, features = ["os-webview", "protocol", "drag-drop", "devtools"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -923,7 +923,7 @@
   </dialog>
   <dialog class="dialog whats-new-dialog" id="whats-new-dialog" aria-labelledby="whats-new-title">
     <div class="whats-new-head">
-      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.0</span>
+      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.1</span>
       <h2 id="whats-new-title">What’s New in Wardr</h2>
       <p id="whats-new-summary">Security upgrades, new protections, and improvements in this release.</p>
     </div>
@@ -942,7 +942,13 @@
       <p>Connect to Wardr for signed security updates, support, and optional privacy-first threat intelligence.</p>
     </div>
     <div class="dialog-body auth-body">
-      <div class="sso-buttons">
+      <div class="auth-legal-box" id="auth-legal-box">
+        <label class="consent-check">
+          <input type="checkbox" id="auth-accept-legal">
+          <span><strong>Required:</strong> I agree to the <button type="button" class="inline-link-btn" data-open-legal="privacy">Privacy Policy</button> and <button type="button" class="inline-link-btn" data-open-legal="terms">Terms of Use</button>.</span>
+        </label>
+      </div>
+      <div class="sso-buttons" id="sso-buttons">
         <button type="button" class="button button-sso" id="sso-google-btn" data-sso="google">
           <svg class="sso-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z"></path>
@@ -962,7 +968,8 @@
           <span>Continue with Microsoft</span>
         </button>
       </div>
-      <div class="auth-divider"><span>or use email</span></div>
+      <p class="dialog-error" id="auth-error" role="status" hidden></p>
+      <div class="auth-divider" id="auth-divider"><span>or use email</span></div>
       <div class="audience-toggle auth-mode-toggle" role="group" aria-label="Account mode">
         <button type="button" class="audience-pill" data-auth-mode="register" aria-pressed="true">Create account</button>
         <button type="button" class="audience-pill" data-auth-mode="login" aria-pressed="false">Sign in</button>
@@ -982,21 +989,17 @@
         </label>
 
         <div class="auth-consent-box" id="auth-consent-box">
-          <label class="consent-check">
-            <input type="checkbox" id="auth-accept-legal">
-            <span>I agree to the <button type="button" class="inline-link-btn" data-open-legal="privacy">Privacy Policy</button> and <button type="button" class="inline-link-btn" data-open-legal="terms">Terms of Use</button>.</span>
-          </label>
+          <p class="auth-optional-title">Optional sharing (not required to sign in)</p>
           <label class="consent-check consent-opt">
             <input type="checkbox" id="auth-opt-diagnostics">
-            <span><strong>Opt in to redacted system diagnostics</strong> — share sanitized OS &amp; health info for debugging, support, and reliability updates.</span>
+            <span><strong>Redacted system diagnostics</strong> — share sanitized OS &amp; health info for debugging and reliability updates.</span>
           </label>
           <label class="consent-check consent-opt">
             <input type="checkbox" id="auth-opt-threats">
-            <span><strong>Opt in to redacted threat intelligence</strong> — share hashed threat &amp; compromised-package signals to protect the Wardr community faster.</span>
+            <span><strong>Redacted threat intelligence</strong> — share hashed threat &amp; compromised-package signals to protect the Wardr community faster.</span>
           </label>
         </div>
 
-        <p class="dialog-error" id="auth-error" role="status" hidden></p>
         <div class="dialog-actions">
           <button type="submit" class="button button-primary" id="auth-submit-btn">Create Wardr account</button>
         </div>

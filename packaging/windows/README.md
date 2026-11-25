@@ -1,13 +1,15 @@
 # Windows setup
 
-Build on Windows using Python 3.12 or later and [Inno Setup](https://jrsoftware.org/isinfo.php) 6.5 or later. Install `cryptography` in the build interpreter and put `ISCC.exe` on `PATH`. The shared payload builder verifies the published Wardr wheel and the bundled Python runtime before staging the offline installer files.
+Build on Windows using Python 3.12 or later, Rust (`cargo`), and [Inno Setup](https://jrsoftware.org/isinfo.php) 6.5 or later. Install `cryptography` in the build interpreter and put `ISCC.exe` and `cargo` on `PATH`. The shared payload builder verifies the published Wardr wheel and the bundled Python runtime before staging the offline installer files.
 
 Run from the repository root. Set `$version` to the Wardr release you are packaging.
 
 ```powershell
-$version = '0.2.1'
+$version = '0.4.0'
 $payload = Join-Path $env:TEMP ('Wardr payload ' + [guid]::NewGuid())
 $output = Join-Path (Get-Location) 'dist'
+cargo build --release --locked --manifest-path desktop/Cargo.toml
+if ($LASTEXITCODE -ne 0) { throw 'Unable to build the native Wardr desktop app' }
 python -m pip install 'cryptography==50.0.2'
 python packaging/build_payload.py --version $version --output $payload
 if ($LASTEXITCODE -ne 0) { throw 'Unable to stage the Wardr payload' }
@@ -16,7 +18,7 @@ ISCC.exe "/DWardrVersion=$version" "/DWardrPayload=$payload" '/DWardrArch=x64' "
 if ($LASTEXITCODE -ne 0) { throw 'Unable to build Wardr Setup' }
 ```
 
-The setup file is `dist/wardr-<version>-windows-x64-setup.exe`. It installs into `%LOCALAPPDATA%\Programs\Wardr` for the current user and creates a Start menu shortcut. Open **Wardr** from Start to launch the dashboard. Keep its console open while Wardr monitors the machine. Press Ctrl+C in the console to stop it before running Setup or uninstalling.
+The setup file is `dist/wardr-<version>-windows-x64-setup.exe`. It installs `Wardr.exe` and its private runtime into `%LOCALAPPDATA%\Programs\Wardr` for the current user and creates a Start menu shortcut. Open **Wardr** from Start to launch the native Windows app (powered by Microsoft Edge WebView2, with no console window). Closing the window minimizes Wardr to the Windows system tray so continuous monitoring keeps running; right-click the tray icon and choose **Quit Wardr** to stop it before running Setup or uninstalling.
 
 Wardr uses its private virtual environment for the dashboard and signed in-app updates. The installed interpreter can also run terminal commands directly.
 

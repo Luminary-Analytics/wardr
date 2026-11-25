@@ -40,8 +40,22 @@ volume="$stage/volume"
 app="$volume/Wardr.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 /usr/bin/ditto "$payload" "$app/Contents/Resources/payload"
-/usr/bin/swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos13.0" \
-    "$here/Launcher.swift" -o "$app/Contents/MacOS/Wardr"
+if [ -n "${WARDR_DESKTOP_BIN:-}" ]; then
+    cp "$WARDR_DESKTOP_BIN" "$app/Contents/MacOS/Wardr"
+else
+    export PATH="$HOME/.cargo/bin:$PATH"
+    cargo_bin=$(command -v cargo || true)
+    if [ -z "$cargo_bin" ]; then
+        echo "Rust cargo is required to build the native macOS Wardr desktop app." >&2
+        exit 1
+    fi
+    desktop_manifest="$here/../../desktop/Cargo.toml"
+    desktop_target="${CARGO_TARGET_DIR:-$here/../../desktop/target}"
+    MACOSX_DEPLOYMENT_TARGET=13.0 CARGO_TARGET_DIR="$desktop_target" \
+        "$cargo_bin" build --release --locked --manifest-path "$desktop_manifest"
+    cp "$desktop_target/release/wardr-desktop" "$app/Contents/MacOS/Wardr"
+fi
+chmod 755 "$app/Contents/MacOS/Wardr"
 /usr/bin/plutil -create xml1 "$app/Contents/Info.plist"
 plist="$app/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleIdentifier -string com.luminaryanalytics.wardr "$plist"
@@ -52,6 +66,8 @@ plist="$app/Contents/Info.plist"
 /usr/bin/plutil -insert CFBundleShortVersionString -string "$version" "$plist"
 /usr/bin/plutil -insert CFBundleVersion -string "$version" "$plist"
 /usr/bin/plutil -insert LSMinimumSystemVersion -string 13.0 "$plist"
+/usr/bin/plutil -insert NSHighResolutionCapable -bool YES "$plist"
+/usr/bin/plutil -insert NSAppTransportSecurity -xml '<dict><key>NSAllowsLocalNetworking</key><true/></dict>' "$plist"
 marks="$stage/Wardr.iconset"
 mkdir -p "$marks"
 mark="$here/../../wardr/static/wardr-mark.png"

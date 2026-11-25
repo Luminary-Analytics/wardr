@@ -17,7 +17,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import feeds
+from . import feeds, oauth_broker
 
 
 _MAX_REPORT_BYTES = 32 * 1024
@@ -538,11 +538,14 @@ class ThreatNetworkServer(ThreadingHTTPServer):
         *,
         admin_token: str | None = None,
         signing_key_pem: bytes | None = None,
+        broker: oauth_broker.OAuthBroker | None = None,
     ):
         self.store = store
         self.admin_token = admin_token or secrets.token_urlsafe(32)
         self.signing_key_pem = signing_key_pem
         self.limiter = _RateLimiter()
+        self.oauth_limiter = _RateLimiter(limit=60, window=60.0)
+        self.oauth_broker = broker if broker is not None else oauth_broker.OAuthBroker()
         super().__init__(bind_address, _ThreatNetworkHandler)
 
 
@@ -573,6 +576,26 @@ class _ThreatNetworkHandler(BaseHTTPRequestHandler):
     def _json(self, status: HTTPStatus, payload: dict) -> None:
         self._send(status, json.dumps(payload, ensure_ascii=True).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _redirect(self, location: str) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.end_headers()
+
+    def _local_fallback_origin(self) -> str | None:
+        host = (self.headers.get("Host") or "").strip()
+        if not host:
+            return None
+        parsed = urlsplit(f"http://{host}")
+        if parsed.hostname in ("127.0.0.1", "localhost"):
+            return f"http://{host}"
+        return None
+
     def _is_admin(self) -> bool:
         auth = self.headers.get("Authorization") or ""
         expected = f"Bearer {self.server.admin_token}"
@@ -599,9 +622,43 @@ class _ThreatNetworkHandler(BaseHTTPRequestHandler):
         return parsed
 
     def do_GET(self) -> None:
-        path = urlsplit(self.path).path
+        parsed = urlsplit(self.path)
+        path = parsed.path
+        client_ip = self.client_address[0] if self.client_address else "unknown"
         if path == "/v1/health":
-            self._json(HTTPStatus.OK, self.server.store.health())
+            health = self.server.store.health()
+            health["oauth_providers"] = [
+                pid for pid, ready in self.server.oauth_broker.configured_providers().items() if ready
+            ]
+            self._json(HTTPStatus.OK, health)
+        elif path == "/oauth/providers":
+            self._json(HTTPStatus.OK, {"providers": self.server.oauth_broker.configured_providers()})
+        elif path in ("/oauth/google", "/oauth/microsoft"):
+            if not self.server.oauth_limiter.allow(client_ip):
+                self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many sign-in attempts. Try again shortly."})
+                return
+            provider_id = path.rsplit("/", 1)[-1]
+            try:
+                target = self.server.oauth_broker.start_authorization(
+                    provider_id, parsed.query, fallback_origin=self._local_fallback_origin(),
+                )
+                self._redirect(target)
+            except ValueError as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except oauth_broker.BrokerError as exc:
+                self._json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(exc)})
+        elif path in ("/oauth/google/callback", "/oauth/microsoft/callback"):
+            if not self.server.oauth_limiter.allow(client_ip):
+                self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Too many sign-in callbacks. Try again shortly."})
+                return
+            provider_id = path.split("/")[2]
+            try:
+                target = self.server.oauth_broker.handle_callback(provider_id, parsed.query)
+                self._redirect(target)
+            except ValueError as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            except oauth_broker.BrokerError as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
         elif path == "/feeds/defense-v1.json":
             published = self.server.store.read_published_feed()
             if published is None:
@@ -645,6 +702,13 @@ class _ThreatNetworkHandler(BaseHTTPRequestHandler):
                 payload = self._read_json(_MAX_TELEMETRY_BYTES)
                 receipt = self.server.store.ingest_telemetry(payload, client_ip=client_ip)
                 self._json(HTTPStatus.ACCEPTED, receipt)
+            elif path == "/oauth/token":
+                if not self.server.oauth_limiter.allow(client_ip):
+                    self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Rate limit exceeded. Try again shortly."})
+                    return
+                body = self._read_json(4096)
+                result = self.server.oauth_broker.exchange_code(body)
+                self._json(HTTPStatus.OK, result)
             elif path == "/v1/feeds/publish":
                 if not self._is_admin():
                     self._json(HTTPStatus.UNAUTHORIZED, {"error": "Valid Bearer token required."})
@@ -673,5 +737,5 @@ class _ThreatNetworkHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": str(exc)})
         except KeyError as exc:
             self._json(HTTPStatus.NOT_FOUND, {"error": str(exc)})
-        except (ValueError, feeds.FeedError) as exc:
+        except (ValueError, feeds.FeedError, oauth_broker.BrokerError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})

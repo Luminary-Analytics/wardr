@@ -1538,7 +1538,12 @@ const updateViews = {
   available: ["Update available", "Wardr will verify the download and update this installation."],
   installing: ["Installing update", "Wardr is downloading, verifying, and installing the release."],
   installed: ["Update installed", "Restart Wardr to use the installed version."],
-  restarting: ["Restarting Wardr", "Open the new Wardr window or use the launch link printed in your terminal."],
+  restarting: [
+    "Restarting Wardr",
+    window.__WARDR_DESKTOP__
+      ? "Wardr is restarting and will reconnect automatically."
+      : "Open the new Wardr window or use the launch link printed in your terminal.",
+  ],
   unavailable: ["Updates unavailable", ""],
   error: ["Update could not complete", ""],
 };
@@ -3284,6 +3289,31 @@ async function dismissWhatsNew() {
   }
 }
 
+function showAuthError(message) {
+  const errorEl = element("auth-error");
+  setText("auth-error", message);
+  errorEl.hidden = false;
+  errorEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function clearAuthError() {
+  element("auth-error").hidden = true;
+  element("auth-legal-box").classList.remove("needs-attention");
+}
+
+function requireLegalAgreement() {
+  if (state.authMode === "login" || element("auth-accept-legal").checked) {
+    element("auth-legal-box").classList.remove("needs-attention");
+    return true;
+  }
+  const legalBox = element("auth-legal-box");
+  legalBox.classList.add("needs-attention");
+  legalBox.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  element("auth-accept-legal").focus();
+  showAuthError("Please check the Privacy Policy and Terms of Use box above to continue.");
+  return false;
+}
+
 function setAuthMode(mode) {
   state.authMode = mode === "login" ? "login" : "register";
   for (const pill of document.querySelectorAll("[data-auth-mode]")) {
@@ -3291,12 +3321,13 @@ function setAuthMode(mode) {
   }
   const isReg = state.authMode === "register";
   element("auth-name-wrap").hidden = !isReg;
+  element("auth-legal-box").hidden = !isReg;
   element("auth-consent-box").hidden = !isReg;
   element("auth-password").minLength = isReg ? 10 : 1;
   element("auth-password").autocomplete = isReg ? "new-password" : "current-password";
   setText("auth-password-hint", isReg ? "(10+ characters)" : "");
   setText("auth-submit-btn", isReg ? "Create Wardr account" : "Sign in");
-  element("auth-error").hidden = true;
+  clearAuthError();
 }
 
 function accountInitials(name, email) {
@@ -3347,6 +3378,24 @@ function renderAccount(acct) {
     setText("sidebar-account-email", "Account & privacy");
   }
 
+  const providers = Array.isArray(acct.sso_providers) ? acct.sso_providers : [];
+  let configuredSsoCount = 0;
+  for (const btn of document.querySelectorAll("[data-sso]")) {
+    const match = providers.find((item) => item.id === btn.dataset.sso);
+    const enabled = match ? Boolean(match.configured) : true;
+    btn.hidden = !enabled;
+    if (enabled) configuredSsoCount += 1;
+  }
+  const ssoGroup = element("sso-buttons");
+  if (ssoGroup) {
+    ssoGroup.hidden = configuredSsoCount === 0;
+    ssoGroup.dataset.count = String(configuredSsoCount);
+  }
+  const authDivider = element("auth-divider");
+  if (authDivider) {
+    authDivider.hidden = configuredSsoCount === 0;
+  }
+
   const gate = element("auth-gate-dialog");
   if (acct.auth_required && !gate.open && !element("legal-dialog").open) {
     setAuthMode(state.authMode);
@@ -3375,8 +3424,9 @@ function renderAccount(acct) {
 async function submitAuthForm(event) {
   event.preventDefault();
   if (state.pendingAuth) return;
+  if (!requireLegalAgreement()) return;
   state.pendingAuth = true;
-  element("auth-error").hidden = true;
+  clearAuthError();
   element("auth-submit-btn").disabled = true;
   try {
     const email = element("auth-email").value.trim();
@@ -3398,8 +3448,7 @@ async function submitAuthForm(event) {
     await refreshAfterAction();
     setText("announcer", "Signed in to Wardr.");
   } catch (error) {
-    setText("auth-error", errorText(error, "Sign-in could not complete."));
-    element("auth-error").hidden = false;
+    showAuthError(errorText(error, "Sign-in could not complete."));
   } finally {
     state.pendingAuth = false;
     element("auth-submit-btn").disabled = false;
@@ -3407,7 +3456,8 @@ async function submitAuthForm(event) {
 }
 
 async function triggerSso(provider) {
-  element("auth-error").hidden = true;
+  clearAuthError();
+  if (!requireLegalAgreement()) return;
   try {
     const result = await request("/api/account/sso/start", {
       provider,
@@ -3415,12 +3465,10 @@ async function triggerSso(provider) {
     });
     if (result.authorize_url) {
       window.open(result.authorize_url, "_blank", "noopener,noreferrer");
-      setText("auth-error", "Finish signing in with " + capitalized(provider) + " in the opened browser tab — Wardr will unlock automatically.");
-      element("auth-error").hidden = false;
+      showAuthError("Finish signing in with " + capitalized(provider) + " in your browser — Wardr will unlock automatically.");
     }
   } catch (error) {
-    setText("auth-error", errorText(error, "Could not start sign-in."));
-    element("auth-error").hidden = false;
+    showAuthError(errorText(error, "Could not start sign-in."));
   }
 }
 
@@ -3539,6 +3587,9 @@ for (const pill of document.querySelectorAll("[data-auth-mode]")) {
 for (const btn of document.querySelectorAll("[data-sso]")) {
   btn.addEventListener("click", () => triggerSso(btn.dataset.sso));
 }
+element("auth-accept-legal").addEventListener("change", () => {
+  if (element("auth-accept-legal").checked) clearAuthError();
+});
 for (const btn of document.querySelectorAll("[data-open-legal]")) {
   btn.addEventListener("click", () => openLegalDialog(btn.dataset.openLegal));
 }

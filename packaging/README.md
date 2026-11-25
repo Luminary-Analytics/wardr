@@ -1,10 +1,11 @@
 # Native Wardr installers
 
-Each installer contains the signed Wardr Community release and a private
-Python runtime and dependency wheelhouse. It can install without a network
-connection, a system Python installation, or administrator access. Launch
-Wardr from the Start menu on Windows, Applications on macOS, or the
-applications menu on Linux. Wardr opens its local dashboard in your browser.
+Each installer contains the signed Wardr Community release, a native desktop
+application shell, and a private Python runtime and dependency wheelhouse. It
+can install without a network connection, a system Python installation, or
+administrator access. Launch Wardr from the Start menu on Windows, Applications
+on macOS, or the applications menu on Linux. Wardr opens in its own native
+desktop window without a console prompt.
 
 | Platform | Installer | Where setup keeps the runtime |
 | --- | --- | --- |
@@ -12,9 +13,10 @@ applications menu on Linux. Wardr opens its local dashboard in your browser.
 | macOS 13 and newer, Apple Silicon or Intel | `.dmg` containing Wardr.app | `~/Library/Application Support/Wardr Runtime` |
 | Linux with glibc, x64 or ARM64 | `.run` | `${XDG_DATA_HOME:-$HOME/.local/share}/wardr` |
 
-Windows and Linux desktop launchers open a console alongside the dashboard.
-Use Ctrl+C in that console to stop Wardr. On macOS, choose **Quit Wardr** in the
-app menu. Standard Linux shell tools are required. [Windows installer](windows/README.md) · [Linux installer](linux/README.md)
+Closing the Wardr window minimizes it to the system tray (Windows/Linux) or menu
+bar (macOS) so continuous security monitoring keeps running in the background.
+Choose **Quit Wardr** from the tray/menu bar icon (or `Cmd+Q` on macOS) to stop
+Wardr completely. [Windows installer](windows/README.md) · [Linux installer](linux/README.md)
 
 ## Updates and data
 

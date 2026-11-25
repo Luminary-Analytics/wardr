@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import sys
 import threading
 import webbrowser
 from html import escape
@@ -230,7 +231,7 @@ class DashboardRequest(BaseHTTPRequestHandler):
                 ok=True,
                 title=f"Welcome, {who}!",
                 subtitle=f"Verified with {provider} ({email})" if email else f"Verified with {provider}",
-                detail="Authentication succeeded. Return to your Wardr tab (it unlocks automatically), or click below to open your dashboard.",
+                detail="Authentication succeeded. Return to Wardr (it unlocks automatically), or click below to open your dashboard.",
                 launch_url=self.server.issue_launch_url(),
             )
             self._respond(HTTPStatus.OK, body, "text/html; charset=utf-8")
@@ -535,6 +536,7 @@ def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: boo
         state.monitor.start()
         state.start_scan()
         state.start_exposure()
+        state.accounts.refresh_broker_providers_async()
         threading.Thread(target=repeat, args=(state.start_scan, 3600), name="wardr-scan-timer", daemon=True).start()
         if auto_advisories:
             state.start_advisory_refresh()
@@ -542,6 +544,20 @@ def serve(state: WardrState, port: int, open_browser: bool, auto_advisories: boo
                 target=repeat, args=(state.start_advisory_refresh, 6 * 3600),
                 name="wardr-advisory-timer", daemon=True,
             ).start()
+        if os.environ.get("WARDR_DESKTOP_SHELL") == "1":
+            def watch_desktop_parent() -> None:
+                try:
+                    stream = getattr(sys.stdin, "buffer", sys.stdin)
+                    if stream is None:
+                        return
+                    while stream.read(1):
+                        pass
+                except (OSError, ValueError):
+                    pass
+                if not stopping.is_set():
+                    server.shutdown()
+
+            threading.Thread(target=watch_desktop_parent, name="wardr-desktop-parent", daemon=True).start()
         print(f"Wardr is running at {server.launch_url}", flush=True)
         if open_browser:
             threading.Thread(target=webbrowser.open, args=(server.launch_url,), daemon=True).start()

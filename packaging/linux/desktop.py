@@ -15,18 +15,30 @@ def desktop_value(value: str) -> str:
 
 
 def write_desktop(data_home: Path, interpreter: Path) -> None:
-    if {"%", "="}.intersection(str(interpreter)):
+    install_root = interpreter.parents[2] if len(interpreter.parents) >= 3 else interpreter.parent
+    desktop_bin = install_root / "wardr-desktop"
+    native_app = desktop_bin.is_file()
+    target = desktop_bin if native_app else interpreter
+    if {"%", "="}.intersection(str(target)):
         raise ValueError("The installation path uses characters reserved by desktop launchers.")
-    executable = str(interpreter).translate(str.maketrans({char: f"\\{char}" for char in '\\"`$'}))
+    executable = str(target).translate(str.maketrans({char: f"\\{char}" for char in '\\"`$'}))
     icon = files("wardr").joinpath("static", "wardr-mark.png")
+    exec_line = (
+        f'Exec="{desktop_value(executable)}"\n'
+        if native_app
+        else f'Exec="{desktop_value(executable)}" -I -m wardr\n'
+    )
+    terminal_line = "Terminal=false\n" if native_app else "Terminal=true\n"
+    wm_class_line = "StartupWMClass=wardr-desktop\n" if native_app else ""
     entry = (
         "[Desktop Entry]\n"
         "Type=Application\n"
         "Name=Wardr\n"
         "Comment=Review device security and verify fixes\n"
-        f'Exec="{desktop_value(executable)}" -I -m wardr\n'
+        f"{exec_line}"
         f"Icon={desktop_value(str(icon))}\n"
-        "Terminal=true\n"
+        f"{terminal_line}"
+        f"{wm_class_line}"
         "Categories=System;Security;\n"
     )
     applications = data_home / "applications"

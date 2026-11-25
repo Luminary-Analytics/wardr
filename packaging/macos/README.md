@@ -1,8 +1,9 @@
 # Wardr macOS disk images
 
-Build on the Mac architecture you plan to distribute. Use Xcode, a staged
-Wardr payload, a **Developer ID Application** identity with its private key
-available to `codesign`, and a Keychain profile for your Apple notary team.
+Build on the Mac architecture you plan to distribute. Use Xcode command-line
+tools, Rust (`cargo`), a staged Wardr payload, a **Developer ID Application**
+identity with its private key available to `codesign`, and a Keychain profile
+for your Apple notary team.
 Check identities with `security find-identity -v -p codesigning`. Prepare the
 profile interactively with `xcrun notarytool store-credentials wardr-notary`.
 Keep the credentials in Keychain. [Apple Developer ID](https://developer.apple.com/developer-id/) ·

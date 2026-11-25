@@ -2585,17 +2585,50 @@ h1, h2, h3 { color: var(--ink); }
 .whats-new-item strong { display: block; font-size: .9rem; color: var(--ink); }
 .whats-new-item p { margin-top: 2px; font-size: .82rem; color: var(--muted); line-height: 1.45; }
 
-.auth-dialog { width: min(560px, calc(100% - 28px)); max-width: min(560px, calc(100% - 28px)); padding: 0; overflow: hidden; }
+.auth-dialog {
+  width: min(560px, calc(100% - 28px));
+  max-width: min(560px, calc(100% - 28px));
+  max-height: min(92vh, 820px);
+  padding: 0;
+  overflow: hidden;
+}
+.auth-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
 .auth-hero {
-  padding: 22px 24px 18px;
+  flex: none;
+  padding: 18px 24px 16px;
   color: #f4faf4;
   background: linear-gradient(125deg, #0f271f 0%, #173d2e 65%, #1f533c 100%);
 }
 .auth-brand { display: inline-flex; align-items: center; gap: 9px; font-size: 1.25rem; font-weight: 760; letter-spacing: -.04em; color: #fff; }
-.auth-hero h2 { color: #fff; margin-top: 10px; font-size: 1.32rem; }
-.auth-hero p { color: #d1e6d7; margin-top: 5px; font-size: .88rem; }
-.auth-body { display: grid; gap: 13px; }
+.auth-hero h2 { color: #fff; margin-top: 8px; font-size: 1.28rem; }
+.auth-hero p { color: #d1e6d7; margin-top: 4px; font-size: .86rem; }
+.auth-body { display: grid; gap: 11px; overflow-y: auto; flex: 1 1 auto; }
+.auth-legal-box {
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: #f5f9f3;
+  border: 1.5px solid #cfe0cc;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+.auth-legal-box.needs-attention {
+  background: #fef5f2;
+  border-color: #c84b31;
+  box-shadow: 0 0 0 3px rgba(200, 75, 49, 0.16);
+}
 .sso-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.sso-buttons[data-count="1"] { grid-template-columns: 1fr; }
+.sso-buttons[hidden] { display: none; }
+.auth-optional-title {
+  margin: 0;
+  font-size: .74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
 .button-sso {
   background: #ffffff;
   color: var(--ink);
