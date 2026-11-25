@@ -193,7 +193,7 @@ class DashboardRequest(BaseHTTPRequestHandler):
             if ok and launch_url else ""
         )
         return (
-            "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+            "<!doctype html><html lang='en' data-theme='dark'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             "<title>Wardr Sign-In</title><link rel='icon' href='/static/wardr-mark.png'>"
             "<link rel='stylesheet' href='/static/wardr.css'></head>"

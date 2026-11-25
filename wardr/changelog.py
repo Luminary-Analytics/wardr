@@ -7,6 +7,34 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.4",
+        "date": "2026-11-25",
+        "title": "Default Dark Mode, Guided Fix-All-to-Green Checklist & Unverified Check Resolution",
+        "summary": "Wardr now defaults to a sleek Dark Mode matching getwardr.com (with a 1-click Light Mode toggle), and any non-Green scan pops up a unified Fix All \u2192 Go Green flow with direct OS Settings shortcuts, how-to guides, individual checkboxes, and Select All.",
+        "highlights": [
+            {
+                "tag": "New",
+                "title": "Default Dark Mode + One-Click Light Mode Toggle",
+                "detail": "Wardr now launches in Dark Mode using getwardr.com's obsidian-emerald palette, with a top-bar Light / Dark toggle remembered across sessions.",
+            },
+            {
+                "tag": "New",
+                "title": "Unified Fix All → Go Green Flow on Every Non-Green Scan",
+                "detail": "Whenever your device is Yellow or Red (including manual or unverified checks), a prominent Fix All → Go Green button appears right on the scan completion modal and Overview hero banner.",
+            },
+            {
+                "tag": "New",
+                "title": "Guided Manual Checklist with Quick OS Settings Links & Select All",
+                "detail": "Auto-fixable issues run automatically first, then any remaining manual or unverified items open in a clean checklist with one-click Windows/macOS Settings shortcuts, official guides, individual checkboxes, and Select All → Mark fixed.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Evidence-Tracked Verification for Unverified Checks",
+                "detail": "Manual and unverified checks can now be confirmed in batch to reach 100% Green, while Wardr automatically re-alerts if the underlying system evidence ever changes on a future scan.",
+            },
+        ],
+    },
+    {
         "version": "0.4.3",
         "date": "2026-11-25",
         "title": "Guided Fix-All-to-Green Checklist & Unverified Check Resolution",

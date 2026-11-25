@@ -19,7 +19,30 @@ function initialAudienceMode() {
     return "plain";
   }
 }
+function initialTheme() {
+  try {
+    return window.localStorage.getItem("wardr-theme") === "light" ? "light" : "dark";
+  } catch {
+    return "dark";
+  }
+}
+function applyTheme(theme) {
+  const mode = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = mode;
+  try {
+    window.localStorage.setItem("wardr-theme", mode);
+  } catch {
+    /* ignore */
+  }
+  const btn = element("theme-toggle-button");
+  if (btn) {
+    btn.textContent = mode === "dark" ? "☀ Light" : "☾ Dark";
+    btn.setAttribute("aria-label", mode === "dark" ? "Switch to light mode" : "Switch to dark mode");
+    btn.setAttribute("aria-pressed", String(mode === "dark"));
+  }
+}
 const state = {
+  theme: initialTheme(),
   data: null,
   view: "overview",
   overviewFilter: "all",
@@ -3855,6 +3878,11 @@ for (const id of ["software-sbom", "software-osv"]) element(id).addEventListener
 element("local-model-check").addEventListener("click", () => runModelAction(false));
 element("local-model-review").addEventListener("click", () => runModelAction(true));
 
+element("theme-toggle-button").addEventListener("click", () => {
+  state.theme = state.theme === "dark" ? "light" : "dark";
+  applyTheme(state.theme);
+});
+applyTheme(state.theme);
 element("scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("hero-scan-button").addEventListener("click", () => startScan(state.selectedScanProfile));
 element("hero-scan-depth").addEventListener("click", openScanDialog);

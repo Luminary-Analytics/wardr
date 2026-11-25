@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark light">
   <title>Wardr</title>
   <link rel="icon" href="/static/wardr-mark.png">
   <link rel="stylesheet" href="/static/wardr.css">
@@ -59,6 +59,7 @@
           </div>
           <div class="topline-actions">
             <div class="connection" id="connection"><span class="dot"></span><span id="connection-label">Connecting</span></div>
+            <button class="button button-secondary button-small theme-toggle-btn" type="button" id="theme-toggle-button" aria-label="Switch to light mode" title="Toggle Dark / Light mode">☀ Light</button>
             <button class="button button-secondary button-small" type="button" id="whats-new-button" aria-haspopup="dialog" disabled>What’s new</button>
             <button class="button button-secondary button-small" type="button" id="updates-button" aria-haspopup="dialog" disabled>Updates</button>
             <button class="button button-secondary button-small account-chip" type="button" id="account-button" aria-haspopup="dialog" disabled>
@@ -950,7 +951,7 @@
   </dialog>
   <dialog class="dialog whats-new-dialog" id="whats-new-dialog" aria-labelledby="whats-new-title">
     <div class="whats-new-head">
-      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.3</span>
+      <span class="whats-new-pill" id="whats-new-version">Wardr v0.4.4</span>
       <h2 id="whats-new-title">What’s New in Wardr</h2>
       <p id="whats-new-summary">Security upgrades, new protections, and improvements in this release.</p>
     </div>

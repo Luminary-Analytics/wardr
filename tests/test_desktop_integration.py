@@ -80,6 +80,10 @@ class DesktopShellIntegrationTests(unittest.TestCase):
     def test_overview_hero_has_one_click_fix_and_depth_controls(self):
         html = (REPO_ROOT / "wardr/static/index.html").read_text(encoding="utf-8")
         js = (REPO_ROOT / "wardr/static/wardr.js").read_text(encoding="utf-8")
+        css = (REPO_ROOT / "wardr/static/wardr.css").read_text(encoding="utf-8")
+        self.assertIn('<html lang="en" data-theme="dark">', html)
+        self.assertIn('id="theme-toggle-button"', html)
+        self.assertIn(':root[data-theme="dark"]', css)
         self.assertIn('id="hero-fix-button"', html)
         self.assertIn('id="hero-scan-depth"', html)
         self.assertIn('element("hero-scan-button").addEventListener("click", () => startScan(state.selectedScanProfile))', js)

@@ -2950,3 +2950,359 @@ body:has(dialog[open]) .radar-blip {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ============================================================================
+   Default Dark Theme (matches getwardr.com obsidian-emerald palette)
+   Light theme remains available via the top-bar toggle (data-theme="light").
+   ============================================================================ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #eef7f1;
+  background: #050f0c;
+  --ink: #eef7f1;
+  --muted: #9eb9aa;
+  --line: rgba(146, 198, 173, 0.16);
+  --paper: #0c1f18;
+  --forest: #071611;
+  --leaf: #d0f488;
+  --action: #22c55e;
+  --rag-green: #4ade80;
+  --rag-green-soft: rgba(34, 197, 94, 0.16);
+  --rag-green-ink: #86efac;
+  --rag-amber: #fbbf24;
+  --rag-amber-soft: rgba(245, 158, 11, 0.16);
+  --rag-amber-ink: #fde68a;
+  --rag-red: #f87171;
+  --rag-red-soft: rgba(239, 68, 68, 0.18);
+  --rag-red-ink: #fca5a5;
+}
+
+:root[data-theme="dark"] body {
+  background: #050f0c;
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .sidebar {
+  background: #071611;
+  border-right: 1px solid rgba(146, 198, 173, 0.14);
+}
+:root[data-theme="dark"] .navigation a:hover { background: rgba(126, 232, 194, 0.1); }
+:root[data-theme="dark"] .navigation a[aria-current="page"] { background: rgba(208, 244, 136, 0.14); color: var(--leaf); }
+
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .dialog,
+:root[data-theme="dark"] .oauth-card {
+  background: #0c1f18;
+  border-color: rgba(146, 198, 173, 0.18);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme="dark"] .skip-link { background: #122c23; color: var(--ink); }
+
+:root[data-theme="dark"] .live-pill,
+:root[data-theme="dark"] .connection,
+:root[data-theme="dark"] .account-chip,
+:root[data-theme="dark"] .filter-pill,
+:root[data-theme="dark"] .defense-tabs,
+:root[data-theme="dark"] .audience-toggle {
+  background: #0d231b;
+  border-color: rgba(146, 198, 173, 0.22);
+  color: #d7ebe0;
+}
+:root[data-theme="dark"] .live-pill[data-active="true"] {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(74, 222, 128, 0.34);
+  color: #86efac;
+}
+:root[data-theme="dark"] .live-pill[data-scanning="true"] {
+  background: rgba(208, 244, 136, 0.14);
+  border-color: rgba(208, 244, 136, 0.36);
+  color: #e4fcad;
+}
+:root[data-theme="dark"] .connection[data-state="offline"] {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.36);
+  color: #fca5a5;
+}
+
+:root[data-theme="dark"] .button-secondary,
+:root[data-theme="dark"] .button-sso {
+  background: #122c23;
+  border-color: rgba(146, 198, 173, 0.26);
+  color: #eef7f1;
+}
+:root[data-theme="dark"] .button-secondary:not(:disabled):hover,
+:root[data-theme="dark"] .button-sso:not(:disabled):hover,
+:root[data-theme="dark"] .filter-pill:hover {
+  background: #183a2e;
+  border-color: rgba(164, 222, 192, 0.44);
+  color: #ffffff;
+}
+:root[data-theme="dark"] .button-primary {
+  background: #22c55e;
+  border-color: #4ade80;
+  color: #052e16;
+  font-weight: 760;
+}
+:root[data-theme="dark"] .button-primary:not(:disabled):hover {
+  background: #4ade80;
+  border-color: #86efac;
+}
+:root[data-theme="dark"] .button-ack,
+:root[data-theme="dark"] .button-undo-disp {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(74, 222, 128, 0.34);
+  color: #86efac;
+}
+:root[data-theme="dark"] .button-ack:not(:disabled):hover,
+:root[data-theme="dark"] .button-undo-disp:not(:disabled):hover {
+  background: rgba(34, 197, 94, 0.24);
+  border-color: rgba(134, 239, 172, 0.52);
+}
+:root[data-theme="dark"] .button-settings {
+  background: rgba(59, 130, 246, 0.16);
+  border-color: rgba(96, 165, 250, 0.36);
+  color: #93c5fd;
+}
+:root[data-theme="dark"] .button-settings:not(:disabled):hover {
+  background: rgba(59, 130, 246, 0.26);
+  border-color: rgba(147, 197, 253, 0.56);
+}
+:root[data-theme="dark"] .inline-link-btn,
+:root[data-theme="dark"] .text-link {
+  color: #86efac;
+}
+
+:root[data-theme="dark"] .notice {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(74, 222, 128, 0.34);
+  color: #d1fae5;
+}
+:root[data-theme="dark"] .notice[data-tone="error"] {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fecaca;
+}
+
+:root[data-theme="dark"] .workflow-stage,
+:root[data-theme="dark"] .workflow-actions-panel,
+:root[data-theme="dark"] .mission-body,
+:root[data-theme="dark"] .mission-actions-panel,
+:root[data-theme="dark"] .vrep-body,
+:root[data-theme="dark"] .green-dialog-footer,
+:root[data-theme="dark"] .software-form,
+:root[data-theme="dark"] .defense-model,
+:root[data-theme="dark"] .update-versions,
+:root[data-theme="dark"] .ai-fieldset,
+:root[data-theme="dark"] .ai-triage-box,
+:root[data-theme="dark"] .legal-content {
+  background: #0d221a;
+  border-color: rgba(146, 198, 173, 0.18);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .workflow-stage[data-mode="fix"] {
+  background: #0d281d;
+  border-color: rgba(74, 222, 128, 0.32);
+}
+:root[data-theme="dark"] .workflow-progress,
+:root[data-theme="dark"] .workflow-progress::-webkit-progress-bar {
+  background: #143227;
+}
+:root[data-theme="dark"] .workflow-step,
+:root[data-theme="dark"] .workflow-todo-item,
+:root[data-theme="dark"] .finding,
+:root[data-theme="dark"] .finding-body,
+:root[data-theme="dark"] .sensor-list li,
+:root[data-theme="dark"] .defense-metric,
+:root[data-theme="dark"] .tier-box,
+:root[data-theme="dark"] .scan-option,
+:root[data-theme="dark"] .ai-radio-card,
+:root[data-theme="dark"] .ai-model-card,
+:root[data-theme="dark"] .script-cmd-list li,
+:root[data-theme="dark"] .vrep-tile,
+:root[data-theme="dark"] .vrep-row,
+:root[data-theme="dark"] .matrix-card,
+:root[data-theme="dark"] .matrix-block,
+:root[data-theme="dark"] .attack-path-card,
+:root[data-theme="dark"] .attack-step,
+:root[data-theme="dark"] .whats-new-item,
+:root[data-theme="dark"] .green-toolbar,
+:root[data-theme="dark"] .green-item,
+:root[data-theme="dark"] .auth-legal-box,
+:root[data-theme="dark"] .auth-consent-box,
+:root[data-theme="dark"] .auth-enterprise-note,
+:root[data-theme="dark"] .ai-privacy-callout,
+:root[data-theme="dark"] .coverage,
+:root[data-theme="dark"] .empty {
+  background: #10281f;
+  border-color: rgba(146, 198, 173, 0.18);
+  color: var(--ink);
+}
+:root[data-theme="dark"] .finding-body {
+  background: #0a1b14;
+  border-top-color: rgba(146, 198, 173, 0.14);
+}
+:root[data-theme="dark"] .finding summary:hover {
+  background: rgba(126, 232, 194, 0.06);
+}
+:root[data-theme="dark"] .tier-box[data-active="true"],
+:root[data-theme="dark"] .scan-option[data-selected="true"],
+:root[data-theme="dark"] .ai-radio-card:has(input:checked),
+:root[data-theme="dark"] .ai-model-card:has(input:checked),
+:root[data-theme="dark"] .green-item[data-checked="true"],
+:root[data-theme="dark"] .matrix-block-defense {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(74, 222, 128, 0.45);
+}
+:root[data-theme="dark"] .auth-legal-box.needs-attention {
+  background: rgba(239, 68, 68, 0.16);
+  border-color: #f87171;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
+}
+:root[data-theme="dark"] .auth-enterprise-note strong,
+:root[data-theme="dark"] .green-counter,
+:root[data-theme="dark"] .consent-opt,
+:root[data-theme="dark"] .green-item-step {
+  color: #cfe4d8;
+}
+:root[data-theme="dark"] .auth-divider::before,
+:root[data-theme="dark"] .auth-divider::after {
+  background: rgba(146, 198, 173, 0.2);
+}
+
+:root[data-theme="dark"] .threat-panel[data-threat-state="clear"],
+:root[data-theme="dark"] .vrep-threat-bar,
+:root[data-theme="dark"] .report-rag-preview[data-rag="green"] {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(74, 222, 128, 0.28);
+}
+:root[data-theme="dark"] .threat-panel[data-threat-state="warning"],
+:root[data-theme="dark"] .vrep-threat-bar[data-threat-state="warning"],
+:root[data-theme="dark"] .report-rag-preview[data-rag="amber"],
+:root[data-theme="dark"] .workflow-step[data-status="warn"],
+:root[data-theme="dark"] .matrix-card[data-level="amber"] {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(251, 191, 36, 0.32);
+}
+:root[data-theme="dark"] .threat-panel[data-threat-state="threat"],
+:root[data-theme="dark"] .vrep-threat-bar[data-threat-state="threat"],
+:root[data-theme="dark"] .report-rag-preview[data-rag="red"],
+:root[data-theme="dark"] .workflow-step[data-status="failed"],
+:root[data-theme="dark"] .matrix-card[data-level="red"],
+:root[data-theme="dark"] .attack-path-card[data-status="at_risk"],
+:root[data-theme="dark"] .attack-step[data-result="open"],
+:root[data-theme="dark"] .threat-item {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.34);
+}
+:root[data-theme="dark"] .report-rag-preview {
+  background: #10281f;
+  border-color: rgba(146, 198, 173, 0.2);
+}
+:root[data-theme="dark"] .report-rag-stat,
+:root[data-theme="dark"] .threat-pill,
+:root[data-theme="dark"] .card-icon,
+:root[data-theme="dark"] .step-badge,
+:root[data-theme="dark"] .step-tag,
+:root[data-theme="dark"] .sensor-mark,
+:root[data-theme="dark"] .check-glyph[data-state="neutral"],
+:root[data-theme="dark"] .scan-pill,
+:root[data-theme="dark"] .matrix-summary-pill[data-tone="neutral"],
+:root[data-theme="dark"] .pentest-proof-pill {
+  background: #143227;
+  border-color: rgba(146, 198, 173, 0.22);
+  color: #d7ebe0;
+}
+
+:root[data-theme="dark"] .status-label,
+:root[data-theme="dark"] .whats-new-tag {
+  background: #153529;
+  color: #d5eadd;
+}
+:root[data-theme="dark"] .status-label[data-tone="pass"],
+:root[data-theme="dark"] .status-label[data-tone="queued"],
+:root[data-theme="dark"] .scan-rec-badge,
+:root[data-theme="dark"] .scan-pill[data-cpu="low"],
+:root[data-theme="dark"] .scan-callout-benefit,
+:root[data-theme="dark"] .pentest-proof-pill[data-state="proven"],
+:root[data-theme="dark"] .matrix-summary-pill,
+:root[data-theme="dark"] .workflow-step[data-status="done"] .step-badge,
+:root[data-theme="dark"] .workflow-step[data-status="done"] .step-tag {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  border-color: rgba(74, 222, 128, 0.32);
+}
+:root[data-theme="dark"] .status-label[data-tone="medium"],
+:root[data-theme="dark"] .status-label[data-tone="unknown"],
+:root[data-theme="dark"] .scan-pill[data-cpu="medium"],
+:root[data-theme="dark"] .scan-callout-warning,
+:root[data-theme="dark"] .threat-panel[data-threat-state="warning"] .threat-pill,
+:root[data-theme="dark"] .threat-panel[data-threat-state="warning"] .threat-emblem,
+:root[data-theme="dark"] .matrix-summary-pill[data-tone="amber"],
+:root[data-theme="dark"] .pentest-proof-pill[data-state="warning"],
+:root[data-theme="dark"] .sensor-mark[data-state="warn"],
+:root[data-theme="dark"] .workflow-step[data-status="warn"] .step-badge,
+:root[data-theme="dark"] .workflow-step[data-status="warn"] .step-tag {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.34);
+}
+:root[data-theme="dark"] .status-label[data-tone="critical"],
+:root[data-theme="dark"] .status-label[data-tone="high"],
+:root[data-theme="dark"] .scan-pill[data-cpu="high"],
+:root[data-theme="dark"] .scan-callout-warning[data-severity="high"],
+:root[data-theme="dark"] .threat-panel[data-threat-state="threat"] .threat-pill,
+:root[data-theme="dark"] .threat-panel[data-threat-state="threat"] .threat-emblem,
+:root[data-theme="dark"] .pentest-proof-pill[data-state="exposed"],
+:root[data-theme="dark"] .attack-step[data-result="open"] .attack-step-mark,
+:root[data-theme="dark"] .workflow-step[data-status="failed"] .step-badge,
+:root[data-theme="dark"] .workflow-step[data-status="failed"] .step-tag,
+:root[data-theme="dark"] .oauth-shield[data-tone="error"] {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.38);
+}
+:root[data-theme="dark"] .status-label[data-tone="low"],
+:root[data-theme="dark"] .whats-new-tag[data-kind="improved"],
+:root[data-theme="dark"] .workflow-step[data-status="running"] .step-tag {
+  background: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.34);
+}
+
+:root[data-theme="dark"] .defense-table th {
+  background: #10281f;
+  color: #cfe4d8;
+}
+:root[data-theme="dark"] .defense-table td,
+:root[data-theme="dark"] .defense-table th {
+  border-color: rgba(146, 198, 173, 0.14);
+}
+
+:root[data-theme="dark"] input[type="text"],
+:root[data-theme="dark"] input[type="email"],
+:root[data-theme="dark"] input[type="password"],
+:root[data-theme="dark"] input[type="url"],
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] .field select,
+:root[data-theme="dark"] .ai-field input,
+:root[data-theme="dark"] .ai-field select,
+:root[data-theme="dark"] .sc-path-input {
+  background: #071711;
+  border-color: rgba(146, 198, 173, 0.26);
+  color: #eef7f1;
+}
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+  color: #6e8c7d;
+}
+:root[data-theme="dark"] .dialog::backdrop {
+  background: rgba(2, 10, 7, 0.78);
+}
+:root[data-theme="dark"] .dialog-error {
+  color: #fca5a5;
+}
+:root[data-theme="dark"] .oauth-body {
+  background: radial-gradient(circle at 50% 25%, #123326 0%, #050f0c 70%);
+}
