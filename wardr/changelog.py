@@ -7,6 +7,29 @@ from . import updater
 
 RELEASES: tuple[dict, ...] = (
     {
+        "version": "0.4.6",
+        "date": "2026-11-25",
+        "title": "Seamless Windows In-App Update Restart & Verified Green Shield Hardening",
+        "summary": "Fixed the Windows CPython stdin lock crash during in-app update restarts so clicking Restart Wardr cleanly reloads the updated app without error, alongside Verified Green Shield hardening and expanded exposure checks.",
+        "highlights": [
+            {
+                "tag": "Fixed",
+                "title": "Seamless In-App Update Restart on Windows",
+                "detail": "Duplicated the desktop parent-watcher pipe descriptor and signaled restart handoff cleanly to the native desktop shell, eliminating the Windows `_enter_buffered_busy` crash during in-app restarts.",
+            },
+            {
+                "tag": "Security",
+                "title": "Verified Green Shield Hardening",
+                "detail": "Auto-fixable failures must be fixed rather than acknowledged, the Guided Checklist runs a live OS re-scan to verify fixed controls before clearing them, and acknowledged failing OS controls keep posture Amber until resolved.",
+            },
+            {
+                "tag": "Improved",
+                "title": "Heavy Scan Surface Fix & Exposed VNC / RDP / SMB Detection",
+                "detail": "Fixed Heavy Scan's attack-surface reporting key mismatch, added wildcard-exposed VNC (:5900), RDP (:3389), and SMB (:445) detection, and updated macOS 15+ Gatekeeper repair.",
+            },
+        ],
+    },
+    {
         "version": "0.4.5",
         "date": "2026-11-25",
         "title": "Verified Green Shield Hardening, Heavy Scan Surface Fix & Expanded Exposure Detection",
