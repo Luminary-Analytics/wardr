@@ -11,12 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
-muda = "0.17"
+muda = "0.21"
 open = "5"
-rfd = "0.15"
-tao = "0.34"
-tray-icon = "0.21"
-wry = { version = "0.53", default-features = false, features = ["os-webview", "protocol", "drag-drop", "devtools"] }
+rfd = "0.18"
+tao = "0.37"
+tray-icon = "0.26"
+wry = { version = "0.54", default-features = false, features = ["os-webview", "protocol", "drag-drop", "devtools"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
