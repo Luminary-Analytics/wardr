@@ -19,7 +19,9 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for platform-specific setup, trou
 ```sh
 python -m unittest discover -s tests -v
 node --check wardr/static/wardr.js
-python -m py_compile wardr/*.py
+node --check wardr/static/fleet.js
+python -m py_compile wardr/*.py scripts/*.py
+python scripts/pr_guard.py --mode repo
 ```
 
 If you modify the Rust desktop wrapper under `desktop/`:
@@ -27,6 +29,16 @@ If you modify the Rust desktop wrapper under `desktop/`:
 ```sh
 cargo check --manifest-path desktop/Cargo.toml
 ```
+
+## Review tiers & PR intake
+
+To keep reviews both fast and safe for a local security tool, pull requests are triaged by the highest-risk path they touch (enforced via `.github/CODEOWNERS` and the **PR Security Guard** workflow):
+
+- **Tier 0 — Lockdown** (`wardr/keys/`, `.github/`, `packaging/`, `deploy/`, `pyproject.toml`, `desktop/Cargo.*`, `desktop/build.rs`, `wardr/updater.py`, `wardr/update_session.py`, `wardr/release.py`): Open a proposal issue first and get maintainer agreement before writing code. Runtime dependency additions require the maintainer-applied `approved-dependency` label.
+- **Tier 1 — Security Core** (`wardr/server.py`, `wardr/oauth_broker.py`, `wardr/account.py`, `wardr/remediation.py`, `wardr/actions.py`, `wardr/fleet*.py`, `wardr/pentest.py`, `wardr/service.py`, `wardr/threat_network.py`, `wardr/local_ai.py`, `wardr/supply_chain.py`, `desktop/src/`): Include targeted unit tests and clearly explain the threat model and rollback/offline behavior.
+- **Tier 2 — Fast Lane** (`docs/`, `tests/`, read-only collectors/reporting, `wardr/static/`): Fastest path to merge once CI and CSP/syntax checks are green.
+
+AI-assisted contributions are welcome provided you have personally reviewed, tested, and understand every line you submit. Unexplained large diffs or drive-by changes to Tier 0/1 paths without an issue may be closed until scoped.
 
 ## Architecture & security principles
 

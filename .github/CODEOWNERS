@@ -1,0 +1,50 @@
+# Wardr CODEOWNERS
+# Every PR requires @LA-Rich review; paths below are grouped by risk tier
+# so maintainers and automation can prioritize security-critical changes.
+
+# Default owner for the repository
+* @LA-Rich
+
+# ---------------------------------------------------------------------------
+# Tier 0 — Lockdown (release keys, CI/CD, packaging, build, dependencies, updater)
+# ---------------------------------------------------------------------------
+/.github/ @LA-Rich
+/scripts/ @LA-Rich
+/wardr/keys/ @LA-Rich
+/packaging/ @LA-Rich
+/deploy/ @LA-Rich
+/render.yaml @LA-Rich
+/pyproject.toml @LA-Rich
+/MANIFEST.in @LA-Rich
+/desktop/Cargo.toml @LA-Rich
+/desktop/Cargo.lock @LA-Rich
+/desktop/build.rs @LA-Rich
+/wardr/updater.py @LA-Rich
+/wardr/update_session.py @LA-Rich
+/wardr/release.py @LA-Rich
+
+# ---------------------------------------------------------------------------
+# Tier 1 — Security Core (auth, HTTP server, remediation, fleet, pentest, service)
+# ---------------------------------------------------------------------------
+/wardr/server.py @LA-Rich
+/wardr/oauth_broker.py @LA-Rich
+/wardr/account.py @LA-Rich
+/wardr/remediation.py @LA-Rich
+/wardr/actions.py @LA-Rich
+/wardr/fleet.py @LA-Rich
+/wardr/fleet_agent.py @LA-Rich
+/wardr/pentest.py @LA-Rich
+/wardr/service.py @LA-Rich
+/wardr/threat_network.py @LA-Rich
+/wardr/local_ai.py @LA-Rich
+/wardr/supply_chain.py @LA-Rich
+/desktop/src/ @LA-Rich
+
+# ---------------------------------------------------------------------------
+# Security & Governance Docs
+# ---------------------------------------------------------------------------
+/SECURITY.md @LA-Rich
+/PRIVACY.md @LA-Rich
+/TERMS.md @LA-Rich
+/CONTRIBUTING.md @LA-Rich
+/LICENSE @LA-Rich

@@ -1,0 +1,31 @@
+name: Feature / Security Check Proposal
+description: Propose a new feature, assessment check, or architectural change before opening a PR.
+title: "[Proposal]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For non-trivial features, new dependencies, or changes to security-sensitive modules (`updater`, `remediation`, `fleet`, `server`, `oauth_broker`, `desktop`), please discuss your proposal here before opening a pull request.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or user workflow
+      description: What defensive gap or workflow does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed design
+      description: High-level approach, affected modules, and how it preserves offline mode, zero-RCE, and minimal dependencies.
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Architectural constraints check
+      options:
+        - label: Works with `wardr serve --offline` (or clearly documents opt-in network behavior)
+        - label: Requires no new Python runtime dependencies
+        - label: I am willing to open a PR once the approach is agreed upon

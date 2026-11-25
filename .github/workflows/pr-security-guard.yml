@@ -1,0 +1,64 @@
+name: PR Security Guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Security invariants & risk triage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+      - name: Run repository security invariant checks
+        env:
+          ALLOW_DEP_CHANGE: ${{ contains(github.event.pull_request.labels.*.name, 'approved-dependency') }}
+        run: |
+          args=(--mode repo --summary-out "$GITHUB_STEP_SUMMARY")
+          if [ "$ALLOW_DEP_CHANGE" = "true" ]; then
+            args+=(--allow-dependency-change)
+          fi
+          python scripts/pr_guard.py "${args[@]}"
+      - name: Run PR diff risk classification & security guard
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ALLOW_DEP_CHANGE: ${{ contains(github.event.pull_request.labels.*.name, 'approved-dependency') }}
+        run: |
+          args=(--mode diff --base "$BASE_SHA" --head "$HEAD_SHA" --summary-out "$GITHUB_STEP_SUMMARY")
+          if [ "$ALLOW_DEP_CHANGE" = "true" ]; then
+            args+=(--allow-dependency-change)
+          fi
+          python scripts/pr_guard.py "${args[@]}"
+      - name: Static syntax hygiene (Python & JS)
+        run: |
+          python -m py_compile wardr/*.py scripts/*.py
+          node --check wardr/static/wardr.js
+          node --check wardr/static/fleet.js
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: moderate
+          deny-licenses: AGPL-3.0, GPL-3.0
